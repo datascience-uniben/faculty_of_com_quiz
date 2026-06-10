@@ -4,6 +4,8 @@ import random
 import time
 import os
 import base64
+import requests
+import json
 from datetime import datetime
 
 # -------------------------------
@@ -12,13 +14,25 @@ from datetime import datetime
 st.set_page_config(
     page_title="Faculty of Computing Quiz Competition",
     page_icon="🏆",
-    layout="wide",  # Expands the window to use the full width of the screen
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# -------------------------------
-# CONFIGURATION & FILE DICTIONARIES
-# -------------------------------
+# --- GITHUB REPOSITORY STORAGE PARAMETERS ---
+REPO_OWNER = "your-github-username"       # Replace with your actual username
+REPO_NAME = "your-repo-repository-name"   # Replace with your quiz repository name
+SCORES_FILE = "scores.csv"
+ROUNDS_FILE = "completed_rounds.csv"
+TEAMS_FILE = "team.csv"
+LOGO_FILE = "logo.png"
+BRANCH = "main"
+
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+HEADERS = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json"
+}
+
 BASE_SUBJECTS = {
     "Nigeria Current Affairs": "affairs",
     "General Computing & ICT": "ICT",
@@ -26,20 +40,35 @@ BASE_SUBJECTS = {
     "General Mathematics": "mathematics"
 }
 
-TEAMS_FILE = "team.csv"
-SCORES_FILE = "scores.csv"
-ROUNDS_FILE = "completed_rounds.csv"
-LOGO_FILE = "logo.png"
+# -------------------------------
+# GITHUB API REMOTE STORAGE ENGINES
+# -------------------------------
+def push_file_to_github(file_path, dataframe, commit_message):
+    """Pushes a pandas DataFrame safely into the repository using the GitHub API."""
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{file_path}"
+    csv_string = dataframe.to_csv(index=False)
+    encoded_content = base64.b64encode(csv_string.encode("utf-8")).decode("utf-8")
+    
+    response = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
+    file_sha = response.json().get("sha") if response.status_code == 200 else None
+
+    payload = {
+        "message": commit_message,
+        "content": encoded_content,
+        "branch": BRANCH
+    }
+    if file_sha:
+        payload["sha"] = file_sha
+
+    put_response = requests.put(url, headers=HEADERS, data=json.dumps(payload))
+    return put_response.status_code in [200, 201]
 
 def load_allowed_teams():
     if os.path.exists(TEAMS_FILE):
         try:
             df = pd.read_csv(TEAMS_FILE)
             team_col = [col for col in df.columns if 'team' in col.lower()]
-            if team_col:
-                return [str(name).strip() for name in df[team_col[0]].dropna().unique()]
-            else:
-                return [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
+            return [str(name).strip() for name in df[team_col[0]].dropna().unique()] if team_col else [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
         except Exception:
             return ["A", "B", "C", "D", "E", "F"]
     return ["A", "B", "C", "D", "E", "F"]
@@ -49,57 +78,46 @@ ALL_TEAMS = load_allowed_teams()
 def get_base64_image(file_path):
     if os.path.exists(file_path):
         with open(file_path, "rb") as f:
-            data = f.read()
-        return base64.b64encode(data).decode()
+            return base64.b64encode(f.read()).decode()
     return None
 
-# -------------------------------
-# QUESTION LOADER
-# -------------------------------
-@st.cache_data
+@st.cache_data(ttl=10) # Quick clear cache setting to check repository files seamlessly
 def load_questions(file_name):
     try:
         df = pd.read_csv(file_name, encoding="cp1252")
         return df.to_dict(orient="records")
-    except UnicodeDecodeError:
-        df = pd.read_csv(file_name, encoding="utf-8", errors="replace")
-        return df.to_dict(orient="records")
-    except FileNotFoundError:
+    except Exception:
         return [{
-            "question": f"⚠️ Missing File Notice: Please create '{file_name}' to load questions.",
-            "optiona": "Option A", "optionb": "Option B", "optionc": "Option C",
-            "optiond": "Option D", "optione": "Option E", "answer": "A"
+            "question": f"⚠️ Missing File Notice: Please upload '{file_name}' to repository.",
+            "optiona": "Opt A", "optionb": "Opt B", "optionc": "Opt C", "optiond": "Opt D", "optione": "Opt E", "answer": "A"
         }]
 
-# -------------------------------
-# PERSISTENCE METHODS
-# -------------------------------
-def save_scores():
-    pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"]).to_csv(SCORES_FILE, index=False)
-
-def load_scores():
-    if os.path.exists(SCORES_FILE):
-        df = pd.read_csv(SCORES_FILE)
-        file_scores = dict(zip(df["Team"].astype(str), df["Total Score"]))
-        return {team: file_scores.get(team, 0) for team in ALL_TEAMS}
+def sync_scores_from_github():
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{SCORES_FILE}"
+    res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
+    if res.status_code == 200:
+        content = base64.b64decode(res.json()["content"]).decode("utf-8")
+        from io import StringIO
+        df = pd.read_csv(StringIO(content))
+        return dict(zip(df["Team"].astype(str), df["Total Score"]))
     return {team: 0 for team in ALL_TEAMS}
 
-def save_completed_rounds():
-    pd.DataFrame(st.session_state.completed_rounds, columns=["Team", "Subject", "Bracket Stage"]).to_csv(ROUNDS_FILE, index=False)
-
-def load_completed_rounds():
-    if os.path.exists(ROUNDS_FILE):
-        df = pd.read_csv(ROUNDS_FILE)
-        return df.values.tolist()
+def sync_rounds_from_github():
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{ROUNDS_FILE}"
+    res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
+    if res.status_code == 200:
+        content = base64.b64decode(res.json()["content"]).decode("utf-8")
+        from io import StringIO
+        return pd.read_csv(StringIO(content)).values.tolist()
     return []
 
 # -------------------------------
 # SESSION STATE INITIALIZATION
 # -------------------------------
 if "scores" not in st.session_state:
-    st.session_state.scores = load_scores()
+    st.session_state.scores = sync_scores_from_github()
 if "completed_rounds" not in st.session_state:
-    st.session_state.completed_rounds = load_completed_rounds()
+    st.session_state.completed_rounds = sync_rounds_from_github()
 if "used_questions" not in st.session_state:
     st.session_state.used_questions = []
 if "round_score" not in st.session_state:
@@ -120,7 +138,7 @@ if "question_pool" not in st.session_state:
     st.session_state.question_pool = []
 
 # -------------------------------
-# CORE ENGINE WORKFLOWS
+# CORE GAME ENGINE OPERATIONS
 # -------------------------------
 def set_question_pool(subject_key, round_number):
     target_csv = f"{BASE_SUBJECTS[subject_key]}{round_number}.csv"
@@ -135,22 +153,21 @@ def set_question_pool(subject_key, round_number):
     headers = [str(k).strip() for k in sample_q.keys()]
     headers_lower = [h.lower() for h in headers]
 
-    def get_csv_value(row, possible_names, default="N/A"):
+    def get_csv_value(row, possible_names):
         for p in possible_names:
             if p.lower() in headers_lower:
-                idx = headers_lower.index(p.lower())
-                return row.get(headers[idx], default)
-        return default
+                return row.get(headers[headers_lower.index(p.lower())], "N/A")
+        return "N/A"
 
     for q in raw_questions:
         standardized_q = {
-            'question': get_csv_value(q, ['question', 'questions', 'q', 'text']),
-            'optiona': get_csv_value(q, ['optiona', 'option a', 'a', 'opt a', 'choice a', 'option 1', 'opt1']),
-            'optionb': get_csv_value(q, ['optionb', 'option b', 'b', 'opt b', 'choice b', 'option 2', 'opt2']),
-            'optionc': get_csv_value(q, ['optionc', 'option c', 'c', 'opt c', 'choice c', 'option 3', 'opt3']),
-            'optiond': get_csv_value(q, ['optiond', 'option d', 'd', 'opt d', 'choice d', 'option 4', 'opt4']),
-            'optione': get_csv_value(q, ['optione', 'option e', 'e', 'opt e', 'choice e', 'option 5', 'opt5']),
-            'answer': str(get_csv_value(q, ['answer', 'correct', 'correct answer', 'ans'], 'A')).strip()
+            'question': get_csv_value(q, ['question', 'q', 'text']),
+            'optiona': get_csv_value(q, ['optiona', 'option a', 'a']),
+            'optionb': get_csv_value(q, ['optionb', 'option b', 'b']),
+            'optionc': get_csv_value(q, ['optionc', 'option c', 'c']),
+            'optiond': get_csv_value(q, ['optiond', 'option d', 'd']),
+            'optione': get_csv_value(q, ['optione', 'option e', 'e']),
+            'answer': str(get_csv_value(q, ['answer', 'correct', 'ans'])).strip()
         }
         cleaned_pool.append(standardized_q)
         
@@ -183,21 +200,33 @@ def terminate_active_round():
         subject = st.session_state.round_subject
         r_num = st.session_state.active_round_num
         
-        round_log_entry = [team, subject, f"Round {r_num}"]
+        round_log_entry = [team, subject, f"Round {r_num}", int(st.session_state.round_score)]
         
-        if round_log_entry not in st.session_state.completed_rounds:
-            st.session_state.scores[team] += st.session_state.round_score
+        # Pull latest records to prevent pipeline overwriting gaps
+        st.session_state.scores = sync_scores_from_github()
+        st.session_state.completed_rounds = sync_rounds_from_github()
+        
+        # Verify if round run entry already tracked
+        existing_runs = [[str(row[0]), str(row[1]), str(row[2])] for row in st.session_state.completed_rounds]
+        if [team, subject, f"Round {r_num}"] not in existing_runs:
+            st.session_state.scores[team] = st.session_state.scores.get(team, 0) + st.session_state.round_score
             st.session_state.completed_rounds.append(round_log_entry)
-            save_scores()
-            save_completed_rounds()
-        
+            
+            # Commit mutations instantly to GitHub cloud layer
+            df_scores_push = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
+            df_rounds_push = pd.DataFrame(st.session_state.completed_rounds, columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
+            
+            push_file_to_github(SCORES_FILE, df_scores_push, f"Update total scores: {team}")
+            push_file_to_github(ROUNDS_FILE, df_rounds_push, f"Log match activity entry: {team}")
+            st.toast("Scores uploaded to GitHub repository! 🚀", icon="✅")
+
         st.session_state.timer_active = False
         st.session_state.current_question = None
         st.session_state.round_team = None
         st.session_state.round_subject = None
 
 # -------------------------------
-# STREAMLIT USER INTERFACE
+# USER INTERFACE SETUP
 # -------------------------------
 st.title("🏆 Faculty of Computing Quiz Competition")
 
@@ -205,7 +234,6 @@ sorted_standings = sorted(st.session_state.scores.items(), key=lambda x: x[1], r
 ranked_team_list = [team for team, score in sorted_standings if team in ALL_TEAMS]
 
 st.sidebar.header("Tournament Progression Panel")
-
 total_teams_count = len(ALL_TEAMS)
 stage_configurations = {
     f"Round 1: Preliminary (All {total_teams_count} Teams)": {"round": 1, "cutoff": total_teams_count},
@@ -220,7 +248,6 @@ current_round_id = stage_configurations[selected_stage_label]["round"]
 allowed_count = stage_configurations[selected_stage_label]["cutoff"]
 
 eligible_teams = ranked_team_list[:allowed_count]
-
 if eligible_teams:
     st.sidebar.markdown(f"**Qualified for this stage:** `{', '.join(eligible_teams)}`")
     chosen_team = st.sidebar.selectbox("Select Active Team", eligible_teams)
@@ -230,53 +257,45 @@ else:
 
 chosen_subject = st.sidebar.selectbox("Choose Subject Area", list(BASE_SUBJECTS.keys()))
 
-is_already_played = [chosen_team, chosen_subject, f"Round {current_round_id}"] in st.session_state.completed_rounds if chosen_team else False
+is_already_played = False
+if chosen_team:
+    for row in st.session_state.completed_rounds:
+        if str(row[0]) == str(chosen_team) and str(row[1]) == str(chosen_subject) and str(row[2]) == f"Round {current_round_id}":
+            is_already_played = True
 
 if is_already_played:
-    st.sidebar.error(f"🚫 {chosen_team} has already attempted {chosen_subject} for Round {current_round_id}!")
+    st.sidebar.error(f"🚫 {chosen_team} has already completed {chosen_subject} for Round {current_round_id}!")
 
-st.sidebar.info(f"📁 Target Question File: `{BASE_SUBJECTS[chosen_subject]}{current_round_id}.csv`")
-
-if st.sidebar.button("🚀 Start 3-Minute Round", disabled=(st.session_state.timer_active or is_already_played or not chosen_team)):
+if st.sidebar.button("🚀 Start 2-Minute Round", disabled=(st.session_state.timer_active or is_already_played or not chosen_team)):
     start_timer(chosen_team, chosen_subject, current_round_id)
     st.rerun()
 
-# --- GAMEPLAY INTERACTION ---
+# --- GAMEPLAY INTERACTION PANELS ---
 if st.session_state.timer_active and st.session_state.round_team:
     elapsed = time.time() - st.session_state.start_time
-    remaining = max(0, 180 - int(elapsed))
+    remaining = max(0, 120 - int(elapsed))
     
     if remaining <= 0:
         terminate_active_round()
-        st.error("⏰ Time's Up!")
-        if st.button("Proceed to Results"):
+        st.error("⏰ Time has expired!")
+        if st.button("Proceed to Global Results"):
             st.rerun()
     else:
         st.markdown(f"### 🎯 Team **{st.session_state.round_team}** is playing **{st.session_state.round_subject}** (Round {st.session_state.active_round_num})!")
-        
-        # Real-time dashboard progress metrics
-        st.progress(remaining / 180)
+        st.progress(remaining / 120)
         st.info(f"⏳ Time Remaining: **{remaining}** seconds | Points Captured: **{st.session_state.round_score}**")
         
         q = st.session_state.current_question
         if q:
             st.write(f"**Question:** {q['question']}")
-            options = [
-                f"A: {q.get('optiona','N/A')}", 
-                f"B: {q.get('optionb','N/A')}", 
-                f"C: {q.get('optionc','N/A')}", 
-                f"D: {q.get('optiond','N/A')}", 
-                f"E: {q.get('optione','N/A')}"
-            ]
-            
+            options = [f"A: {q.get('optiona','N/A')}", f"B: {q.get('optionb','N/A')}", f"C: {q.get('optionc','N/A')}", f"D: {q.get('optiond','N/A')}", f"E: {q.get('optione','N/A')}"]
             choice = st.radio("Options", options, index=None, key="current_options_radio")
             
             col1, col2 = st.columns([1, 4])
             with col1:
                 if st.button("Submit Answer", type="primary"):
                     if choice:
-                        user_letter = choice[0]
-                        if user_letter.upper() == str(q['answer']).strip().upper():
+                        if choice[0].upper() == str(q['answer']).strip().upper():
                             st.session_state.round_score += 1
                             st.toast("Correct! 🎉", icon="✅")
                         else:
@@ -284,92 +303,34 @@ if st.session_state.timer_active and st.session_state.round_team:
                         set_next_question()
                         st.rerun()
                     else:
-                        st.warning("Please pick an option!")
+                        st.warning("Select an option!")
             with col2:
                 if st.button("⏭️ Skip Question"):
                     set_next_question()
                     st.rerun()
         else:
-            st.warning("No more questions available in this category pool.")
+            st.warning("Category question pool depleted.")
             if st.button("End Round Early"):
                 terminate_active_round()
                 st.rerun()
                 
-        # Heartbeat sync delay loop for live visual countdown updates
         time.sleep(0.1)
         st.rerun()
 
-# --- STANDINGS & SCOREBOARD DISPLAY ---
+# --- STANDINGS SCREEN DISPLAY ---
 st.write("---")
 st.subheader("📊 Live Leaderboard")
-
 scores_df = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
-scores_df = scores_df[scores_df["Team"].isin(ALL_TEAMS)]
-scores_df = scores_df.sort_values(by="Total Score", ascending=False).reset_index(drop=True)
+scores_df = scores_df[scores_df["Team"].isin(ALL_TEAMS)].sort_values(by="Total Score", ascending=False).reset_index(drop=True)
 st.dataframe(scores_df.set_index("Team"), use_container_width=True)
 
-if st.session_state.completed_rounds:
-    with st.expander("📝 View Match Logs (Completed Rounds)"):
-        logs_df = pd.DataFrame(st.session_state.completed_rounds, columns=["Team", "Subject Area", "Bracket Stage"])
-        st.table(logs_df[logs_df["Team"].isin(ALL_TEAMS)])
+if st.sidebar.button("🔄 Sync with GitHub Data"):
+    st.session_state.scores = sync_scores_from_github()
+    st.session_state.completed_rounds = sync_rounds_from_github()
+    st.rerun()
 
-# -------------------------------
-# CSS FOOTER ARCHITECTURE (WIDE-SCREEN OPTIMIZED)
-# -------------------------------
-st.markdown("""
-    <style>
-    .quiz-footer {
-        position: fixed;
-        left: 0;
-        bottom: 0;
-        width: 100%;
-        background-color: #0e1117;
-        color: #e2e8f0;
-        
-        display: grid;
-        grid-template-columns: 1fr auto 1fr;
-        align-items: center;
-        
-        padding: 15px 40px;
-        font-size: 22px;
-        font-weight: 600;
-        border-top: 2px solid #262730;
-        z-index: 999;
-    }
-    .footer-text-center {
-        text-align: center;
-        grid-column: 2;
-        max-width: 1000px;
-    }
-    .footer-logo-right {
-        grid-column: 3;
-        justify-self: end;
-    }
-    .footer-logo-right img {
-        height: 45px;
-        width: auto;
-        object-fit: contain;
-    }
-    .main .block-container {
-        padding-bottom: 140px !important;
-        max-width: 95% !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-current_year = datetime.now().year
-total_completed = len(st.session_state.completed_rounds)
+# --- FOOTER FORMATTING ---
+st.markdown("""<style>.quiz-footer { position: fixed; left: 0; bottom: 0; width: 100%; background-color: #0e1117; color: #e2e8f0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 15px 40px; font-size: 22px; font-weight: 600; border-top: 2px solid #262730; z-index: 999; } .footer-text-center { text-align: center; grid-column: 2; max-width: 1000px; } .footer-logo-right { grid-column: 3; justify-self: end; } .footer-logo-right img { height: 45px; width: auto; object-fit: contain; } .main .block-container { padding-bottom: 140px !important; max-width: 95% !important; }</style>""", unsafe_allow_html=True)
 logo_base64 = get_base64_image(LOGO_FILE)
-
 logo_container = f'<div class="footer-logo-right"><img src="data:image/png;base64,{logo_base64}" alt="Logo"></div>' if logo_base64 else '<div class="footer-logo-right"></div>'
-
-footer_html = f"""
-    <div class="quiz-footer">
-        <div class="footer-left-spacer"></div>
-        <div class="footer-text-center">
-            Faculty of Computing Inter-department Quiz Competition • {current_year} • 📊 Completed Match Rounds Tally: {total_completed}
-        </div>
-        {logo_container}
-    </div>
-"""
-st.markdown(footer_html, unsafe_allow_html=True)
+st.markdown(f'<div class="quiz-footer"><div class="footer-left-spacer"></div><div class="footer-text-center">Faculty of Computing Inter-department Quiz Competition • {datetime.now().year} • 📊 Completed Match Rounds Tally: {len(st.session_state.completed_rounds)}</div>{logo_container}</div>', unsafe_allow_html=True)
