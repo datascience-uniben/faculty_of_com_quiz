@@ -1,0 +1,41 @@
+Question,Option A,Option B,Option C,Option D,Option E,Answer
+What is data?,Raw facts,Processed info,Knowledge,Wisdom,Decision,A
+What is information?,Raw facts,Processed data,Noise,Symbols,Random values,B
+Which of these is a data processing cycle stage?,Input,Storage,Processing,Output,All of the above,E
+Which file organization method stores records sequentially?,Sequential,Direct,Indexed,Random,Hierarchical,A
+Which file organization allows fast retrieval by key?,Sequential,Indexed,Direct,Random,Linked,C
+What is batch processing?,Processing data in groups,Real-time processing,Online transaction,Interactive processing,Manual entry,A
+What is real-time processing?,Immediate response,Delayed response,Batch mode,Manual entry,Offline,A
+Which of these is a database model?,Hierarchical,Network,Relational,Object-oriented,All of the above,E
+What does DBMS stand for?,Database Management System,Data Backup Main Storage,Digital Base Memory Setup,Database Machine Software,Data Binary Management Source,A
+Which of these is a primary key?,Unique identifier,Duplicate value,Foreign key,Null field,Random number,A
+What is normalization in databases?,Removing redundancy,Adding redundancy,Encrypting data,Backing up data,Sorting records,A
+Which of these is a data type?,Integer,String,Boolean,Date,All of the above,E
+What is a record?,Collection of fields,Single field,Database,File,Table,A
+What is a field?,Smallest data unit,Collection of records,Database,File,Table,A
+Which of these is a data structure?,Array,Stack,Queue,Linked list,All of the above,E
+What is a transaction in DBMS?,Logical unit of work,Random entry,Backup file,Error log,Report,A
+What is data mining?,Extracting patterns,Storing data,Encrypting data,Backing up data,Deleting data,A
+What is big data characterized by?,Volume,Velocity,Variety,Veracity,All of the above,E
+Which of these is a data processing method?,Manual,Mechanical,Electronic,All of the above,None,D
+What is a data warehouse?,Central repository,Backup system,Transaction file,Temporary storage,Cache,A
+What is OLAP used for?,Analysis,Transaction,Backup,Encryption,Input,A
+What is OLTP used for?,Transaction processing,Analysis,Backup,Encryption,Sorting,A
+Which of these is a file access method?,Sequential,Direct,Indexed,All of the above,None,D
+What is a foreign key?,Links tables,Unique identifier,Duplicate value,Null field,Random number,A
+Which of these is a database language?,SQL,Python,Java,C++,Ruby,A
+What is data integrity?,Accuracy,Consistency,Reliability,Validity,All of the above,E
+What is redundancy in data?,Duplication,Accuracy,Validity,Reliability,Consistency,A
+What is metadata?,Data about data,Raw facts,Processed info,Knowledge,Wisdom,A
+Which of these is a backup method?,Full,Incremental,Differential,All of the above,None,D
+What is encryption?,Securing data,Duplicating data,Sorting data,Backing up data,Mining data,A
+Which of these is a database operation?,Insert,Update,Delete,Select,All of the above,E
+What is a data dictionary?,Catalog of data,Raw facts,Processed info,Knowledge,Wisdom,A
+What is a report generator?,Produces reports,Stores data,Encrypts data,Deletes data,Mines data,A
+What is a query?,Request for data,Backup file,Error log,Transaction,Report,A
+Which of these is a database anomaly?,Update anomaly,Insert anomaly,Delete anomaly,All of the above,None,D
+What is a schema?,Structure of database,Raw facts,Processed info,Knowledge,Wisdom,A
+What is a view in SQL?,Virtual table,Physical table,Backup file,Transaction,Report,A
+What is indexing?,Speeding retrieval,Slowing retrieval,Encrypting data,Backing up data,Mining data,A
+Which of these is a data processing tool?,Excel,SPSS,SAS,R,All of the above,E
+What is cloud data processing?,Online storage & compute,Manual entry,Offline backup,Paper filing,Mechanical,A
