@@ -19,15 +19,15 @@ st.set_page_config(
 )
 
 # --- GITHUB REPOSITORY STORAGE PARAMETERS ---
-REPO_OWNER = "your-github-username"       # Replace with your actual username
-REPO_NAME = "your-repo-repository-name"   # Replace with your quiz repository name
+REPO_OWNER = "datascience-uniben"       # Replace with your actual username
+REPO_NAME = "faculty_of_com_quiz"   # Replace with your quiz repository name
 SCORES_FILE = "scores.csv"
 ROUNDS_FILE = "completed_rounds.csv"
 TEAMS_FILE = "team.csv"
 LOGO_FILE = "logo.png"
 BRANCH = "main"
 
-GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+GITHUB_TOKEN = st.secrets["secret_key"]
 HEADERS = {
     "Authorization": f"token {GITHUB_TOKEN}",
     "Accept": "application/vnd.github.v3+json"
