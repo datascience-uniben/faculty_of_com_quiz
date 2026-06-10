@@ -27,7 +27,7 @@ TEAMS_FILE = "team.csv"
 LOGO_FILE = "logo.png"
 BRANCH = "main"
 
-GITHUB_TOKEN = st.secrets["secret_key"]
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
 HEADERS = {
     "Authorization": f"token {GITHUB_TOKEN}",
     "Accept": "application/vnd.github.v3+json"
