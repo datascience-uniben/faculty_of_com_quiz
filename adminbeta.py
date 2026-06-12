@@ -4,7 +4,9 @@ import requests
 import base64
 import json
 import time
+import os  # <-- Fixed: Added missing import to resolve NameError
 from datetime import datetime
+from io import StringIO
 
 # Set page configuration (MUST BE FIRST)
 st.set_page_config(
@@ -13,8 +15,9 @@ st.set_page_config(
     layout="wide"
 )
 
-REPO_OWNER = "datascience-uniben"       # Replace with your actual username
-REPO_NAME = "faculty_of_com_quiz"   # Replace with your quiz repository name
+# --- REPOSITORY PATH CONSTANTS ---
+REPO_OWNER = "datascience-uniben"       
+REPO_NAME = "faculty_of_com_quiz"   
 SCORES_FILE = "scores.csv"
 ROUNDS_FILE = "completed_rounds.csv"
 TEAMS_FILE = "team.csv"
@@ -27,6 +30,22 @@ HEADERS = {
 }
 
 def load_allowed_teams():
+    """Attempts to pull active team definitions dynamically from GitHub 
+    to ensure deployment environments stay synchronized."""
+    url_teams = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{TEAMS_FILE}"
+    try:
+        res = requests.get(url_teams, headers=HEADERS, params={"ref": BRANCH})
+        if res.status_code == 200:
+            content = base64.b64decode(res.json()["content"]).decode("utf-8")
+            df = pd.read_csv(StringIO(content))
+            team_col = [col for col in df.columns if 'team' in col.lower()]
+            if team_col:
+                return [str(name).strip() for name in df[team_col[0]].dropna().unique()]
+            return [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
+    except Exception:
+        pass
+        
+    # Local fallback file check if API request encounters failure parameters
     if os.path.exists(TEAMS_FILE):
         try:
             df = pd.read_csv(TEAMS_FILE)
@@ -34,6 +53,7 @@ def load_allowed_teams():
             return [str(name).strip() for name in df[team_col[0]].dropna().unique()] if team_col else [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
         except Exception:
             return ["A", "B", "C", "D", "E", "F"]
+            
     return ["A", "B", "C", "D", "E", "F"]
 
 ALL_TEAMS = load_allowed_teams()
@@ -50,7 +70,6 @@ def load_dashboard_data_from_github():
     
     if res_scores.status_code == 200:
         content = base64.b64decode(res_scores.json()["content"]).decode("utf-8")
-        from io import StringIO
         df_scores = pd.read_csv(StringIO(content))
         df_scores["Team"] = df_scores["Team"].astype(str)
     else:
@@ -71,7 +90,6 @@ def load_dashboard_data_from_github():
     
     if res_rounds.status_code == 200:
         content = base64.b64decode(res_rounds.json()["content"]).decode("utf-8")
-        from io import StringIO
         df_rounds = pd.read_csv(StringIO(content))
         df_rounds["Team"] = df_rounds["Team"].astype(str)
         df_rounds = df_rounds[df_rounds["Team"].isin(ALL_TEAMS)]
@@ -83,7 +101,7 @@ def load_dashboard_data_from_github():
 # -----------------------------------------------------------------
 # AUTONOMOUS LIVE MONITORING PROJECTOR SCREEN
 # -----------------------------------------------------------------
-@st.fragment(run_every=4.0) # Triggers visual redraws passively every 4 seconds without freezing input parameters
+@st.fragment(run_every=4.0) 
 def render_live_monitoring_view():
     df_scores, df_rounds = load_dashboard_data_from_github()
     ranked_teams = df_scores["Team"].tolist()
@@ -138,7 +156,6 @@ def render_live_monitoring_view():
             def extract_round_score(round_str):
                 match_row = team_logs[team_logs["Bracket Stage"] == round_str]
                 if not match_row.empty:
-                    # Extracts points mapped directly by the engine update payload
                     return f"{match_row.iloc[0].get('Points Scored', '✅')} pts"
                 return "⏳ Pending"
 
@@ -185,11 +202,9 @@ else:
     col_yes, col_no = st.sidebar.columns(2)
     
     if col_yes.button("Yes, Wipe", type="primary", use_container_width=True):
-        # 1. Reset metrics Locally & Push to GitHub Cloud
         fresh_scores = pd.DataFrame(list({t: 0 for t in ALL_TEAMS}.items()), columns=["Team", "Total Score"])
         fresh_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
         
-        # Helper wipe payload execution 
         def api_wipe(path, df):
             url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{path}"
             csv_str = df.to_csv(index=False)
