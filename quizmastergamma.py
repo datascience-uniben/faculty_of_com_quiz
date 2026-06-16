@@ -324,7 +324,7 @@ scores_df = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team",
 scores_df = scores_df[scores_df["Team"].isin(ALL_TEAMS)].sort_values(by="Total Score", ascending=False).reset_index(drop=True)
 st.dataframe(scores_df.set_index("Team"), use_container_width=True)
 
-if st.sidebar.button("🔄 Sync with GitHub Data"):
+if st.sidebar.button("🔄 Sync with Faculty QUIZ Data"):
     st.session_state.scores = sync_scores_from_github()
     st.session_state.completed_rounds = sync_rounds_from_github()
     st.rerun()
