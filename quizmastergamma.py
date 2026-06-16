@@ -166,7 +166,7 @@ if not st.session_state.authenticated:
     with col_b:
         st.write("")
         st.write("")
-        st.markdown("<h2 style='text-align: center;'>🔐 Faculty Quiz Portal Login</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>🔐 Faculty of Computing Quiz Portal Login</h2>", unsafe_allow_html=True)
         
         with st.form("login_form", clear_on_submit=False):
             input_username = st.text_input("Username").strip()
@@ -267,7 +267,7 @@ def terminate_active_round():
             st.session_state.completed_rounds.append(round_log_entry)
             
             df_scores_push = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
-            df_rounds_push = pd.DataFrame(st.session_state.completed_rounds, columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
+            df_rounds_push = pd.DataFrame(st.session_state.completed_rounds, columns=["Team", "Subject", "Quiz Stage", "Points Scored"])
             
             push_file_to_github(SCORES_FILE, df_scores_push, f"Update total scores: {team}")
             push_file_to_github(ROUNDS_FILE, df_rounds_push, f"Log match activity entry: {team}")
@@ -325,7 +325,7 @@ if filtered_teams:
         chosen_team = st.sidebar.selectbox("Select Active Team", filtered_teams)
 else:
     if st.session_state.user_team not in ["All", "Admin", "SuperAdmin"]:
-        st.sidebar.error(f"❌ Your department ({st.session_state.user_team}) did not qualify for this bracket level.")
+        st.sidebar.error(f"❌ Your department ({st.session_state.user_team}) did not qualify for this Quiz level.")
     else:
         st.sidebar.error("No eligible tournament teams found.")
     chosen_team = None
