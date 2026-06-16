@@ -115,29 +115,33 @@ def sync_rounds_from_github():
         return pd.read_csv(StringIO(content)).values.tolist()
     return []
 
-# 🌟 CRITICAL: DO NOT cache this function anymore. We must read live states.
 def fetch_users_from_github_live():
+    """Downloads the authenticated user database dynamically from GitHub without caching."""
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{USERS_FILE}"
     res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
     if res.status_code == 200:
         content = base64.b64decode(res.json()["content"]).decode("utf-8")
         df = pd.read_csv(StringIO(content))
+        
+        # 🌟 CRITICAL FIX: Standardize column names to lowercase and strip whitespaces
         df.columns = [str(col).strip().lower() for col in df.columns]
         
         if "username" in df.columns and "password" in df.columns and "team" in df.columns and "is_logged_in" in df.columns:
             df["username"] = df["username"].astype(str).str.strip()
             df["password"] = df["password"].astype(str).str.strip()
             df["team"] = df["team"].astype(str).str.strip()
-            df["is_logged_in"] = df["is_logged_in"].astype(int)
+            df["is_logged_in"] = pd.to_numeric(df["is_logged_in"], errors="coerce").fillna(0).astype(int)
             return df
     return pd.DataFrame(columns=["username", "password", "team", "is_logged_in"])
 
 def update_user_login_status(username, status_code):
-    """Updates the user's active session flag inside the remote GitHub CSV repository."""
     all_users = fetch_users_from_github_live()
     if not all_users.empty and "username" in all_users.columns:
-        all_users.loc[all_users["username"] == username, "is_logged_in"] = int(status_code)
-        push_file_to_github(USERS_FILE, all_users, f"Session Update: {username} state -> {status_code}")
+        # Use case-insensitive targeting for flag operations
+        mask = all_users["username"].str.lower() == username.lower()
+        if mask.any():
+            all_users.loc[mask, "is_logged_in"] = int(status_code)
+            push_file_to_github(USERS_FILE, all_users, f"Session Update: {username} state -> {status_code}")
 
 # -------------------------------
 # SESSION STATE INITIALIZATION
@@ -193,29 +197,36 @@ if not st.session_state.authenticated:
                     with st.spinner("Verifying device concurrency restrictions..."):
                         users_df = fetch_users_from_github_live()
                         
-                        matched_user = users_df[(users_df["username"] == input_username) & (users_df["password"] == input_password)]
-                        
-                        if not matched_user.empty:
-                            current_login_state = matched_user.iloc[0]["is_logged_in"]
-                            assigned_team = matched_user.iloc[0]["team"]
+                        if not users_df.empty:
+                            # 🌟 FIX: Fully case-insensitive and space-safe comparison mask
+                            matched_user = users_df[
+                                (users_df["username"].str.lower() == input_username.lower()) & 
+                                (users_df["password"] == input_password)
+                            ]
                             
-                            # 🔒 BLOCK CONCURRENT SESSIONS (Allow 'All'/Admin accounts to bypass if necessary)
-                            if current_login_state == 1 and assigned_team not in ["All", "Admin"]:
-                                st.error(f"🚫 Login Blocked: Someone from '{assigned_team}' is already logged into the quiz hardware system elsewhere.")
-                            else:
-                                # Lock user slot immediately on GitHub repository layer
-                                st.session_state.authenticated = True
-                                st.session_state.current_user = input_username
-                                st.session_state.user_team = assigned_team
+                            if not matched_user.empty:
+                                current_login_state = matched_user.iloc[0]["is_logged_in"]
+                                assigned_team = matched_user.iloc[0]["team"]
+                                actual_username = matched_user.iloc[0]["username"]
                                 
-                                if assigned_team not in ["All", "Admin"]:
-                                    update_user_login_status(input_username, 1)
+                                # Lock active team channels (Allow master admins to bypass restriction checks)
+                                if current_login_state == 1 and str(assigned_team).lower() not in ["all", "admin", "superadmin"]:
+                                    st.error(f"🚫 Login Blocked: Someone from '{assigned_team}' is already logged into the hardware system elsewhere.")
+                                else:
+                                    st.session_state.authenticated = True
+                                    st.session_state.current_user = actual_username
+                                    st.session_state.user_team = assigned_team
                                     
-                                st.success(f"Access Granted! Welcome, {input_username}.")
-                                time.sleep(0.5)
-                                st.rerun()
+                                    if str(assigned_team).lower() not in ["all", "admin", "superadmin"]:
+                                        update_user_login_status(actual_username, 1)
+                                        
+                                    st.success(f"Access Granted! Welcome, {actual_username}.")
+                                    time.sleep(0.5)
+                                    st.rerun()
+                            else:
+                                st.error("❌ Invalid Username or Password. Please try again.")
                         else:
-                            st.error("❌ Invalid Username or Password. Please try again.")
+                            st.error("⚠️ Error: Unable to fetch the user credential records file from GitHub repository.")
     st.stop()  
 
 # -------------------------------
@@ -304,11 +315,13 @@ def terminate_active_round():
         st.session_state.round_subject = None
 
 # --- UI MAIN LAYOUT ---
+st.title("🏆 Faculty of Computing Quiz Competition")
+
 st.sidebar.markdown(f"👤 Logged in Department: **{st.session_state.user_team}**")
 
-# Cleanly unbind tracking states upon intentional log out
+# Cleanly reset and unlock team concurrency slots upon log out
 if st.sidebar.button("🔒 Sign Out of Session", use_container_width=True):
-    if st.session_state.user_team not in ["All", "Admin"]:
+    if str(st.session_state.user_team).lower() not in ["all", "admin", "superadmin"]:
         update_user_login_status(st.session_state.current_user, 0)
     st.session_state.authenticated = False
     st.session_state.current_user = None
@@ -334,7 +347,7 @@ allowed_count = stage_configurations[selected_stage_label]["cutoff"]
 
 eligible_teams = ranked_team_list[:allowed_count]
 
-if st.session_state.user_team in ["All", "Admin"]:
+if str(st.session_state.user_team).lower() in ["all", "admin", "superadmin"]:
     filtered_teams = eligible_teams
 else:
     filtered_teams = [team for team in eligible_teams if str(team).lower() == str(st.session_state.user_team).lower()]
@@ -346,7 +359,7 @@ if filtered_teams:
     else:
         chosen_team = st.sidebar.selectbox("Select Active Team", filtered_teams)
 else:
-    if st.session_state.user_team not in ["All", "Admin"]:
+    if str(st.session_state.user_team).lower() not in ["all", "admin", "superadmin"]:
         st.sidebar.error(f"❌ Your department ({st.session_state.user_team}) did not qualify for this bracket level.")
     else:
         st.sidebar.error("No eligible tournament teams found.")
@@ -430,4 +443,4 @@ if st.sidebar.button("🔄 Sync with GitHub Data"):
 st.markdown("""<style>.quiz-footer { position: fixed; left: 0; bottom: 0; width: 100%; background-color: #0e1117; color: #e2e8f0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 15px 40px; font-size: 22px; font-weight: 600; border-top: 2px solid #262730; z-index: 999; } .footer-text-center { text-align: center; grid-column: 2; max-width: 1000px; } .footer-logo-right { grid-column: 3; justify-self: end; } .footer-logo-right img { height: 45px; width: auto; object-fit: contain; } .main .block-container { padding-bottom: 140px !important; max-width: 95% !important; }</style>""", unsafe_allow_html=True)
 logo_base64 = get_base64_image(LOGO_FILE)
 logo_container = f'<div class="footer-logo-right"><img src="data:image/png;base64,{logo_base64}" alt="Logo"></div>' if logo_base64 else '<div class="footer-logo-right"></div>'
-st.markdown(f'<div class="quiz-footer"><div class="footer-left-spacer"></div><div class="footer-text-center">Faculty of Computing Inter-department Quiz Competition • {datetime.now().year} • 📊 Completed Match Rounds Tally: {len(st.session_state.completed_rounds)}</div>{logo_container}</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="quiz-footer"><div class="footer-left-spacer"></div><div class="footer-text-center">Faculty of Computing Inter-department Quiz Competition • {datetime.now().year} • 📊 Completed Match Rounds Tally
