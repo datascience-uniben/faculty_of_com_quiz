@@ -25,7 +25,7 @@ REPO_NAME = "faculty_of_com_quiz"
 SCORES_FILE = "scores.csv"
 ROUNDS_FILE = "completed_rounds.csv"
 TEAMS_FILE = "team.csv"
-USERS_FILE = "user_teams.csv"  
+USERS_FILE = "users.csv"  
 LOGO_FILE = "logo.png"
 BRANCH = "main"
 
@@ -115,26 +115,39 @@ def sync_rounds_from_github():
         return pd.read_csv(StringIO(content)).values.tolist()
     return []
 
-@st.cache_data(ttl=60)
-def fetch_users_from_github():
+# 🌟 CRITICAL: DO NOT cache this function anymore. We must read live states.
+def fetch_users_from_github_live():
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{USERS_FILE}"
     res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
     if res.status_code == 200:
         content = base64.b64decode(res.json()["content"]).decode("utf-8")
         df = pd.read_csv(StringIO(content))
-        df["username"] = df["username"].astype(str).str.strip()
-        df["password"] = df["password"].astype(str).str.strip()
-        df["team"] = df["team"].astype(str).str.strip()  # Ensure team metadata is read cleanly
-        return df
-    return pd.DataFrame(columns=["username", "password", "team"])
+        df.columns = [str(col).strip().lower() for col in df.columns]
+        
+        if "username" in df.columns and "password" in df.columns and "team" in df.columns and "is_logged_in" in df.columns:
+            df["username"] = df["username"].astype(str).str.strip()
+            df["password"] = df["password"].astype(str).str.strip()
+            df["team"] = df["team"].astype(str).str.strip()
+            df["is_logged_in"] = df["is_logged_in"].astype(int)
+            return df
+    return pd.DataFrame(columns=["username", "password", "team", "is_logged_in"])
+
+def update_user_login_status(username, status_code):
+    """Updates the user's active session flag inside the remote GitHub CSV repository."""
+    all_users = fetch_users_from_github_live()
+    if not all_users.empty and "username" in all_users.columns:
+        all_users.loc[all_users["username"] == username, "is_logged_in"] = int(status_code)
+        push_file_to_github(USERS_FILE, all_users, f"Session Update: {username} state -> {status_code}")
 
 # -------------------------------
 # SESSION STATE INITIALIZATION
 # -------------------------------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
 if "user_team" not in st.session_state:
-    st.session_state.user_team = None  # Tracks the specific team of the logged-in user
+    st.session_state.user_team = None  
 if "scores" not in st.session_state:
     st.session_state.scores = sync_scores_from_github()
 if "completed_rounds" not in st.session_state:
@@ -166,7 +179,7 @@ if not st.session_state.authenticated:
     with col_b:
         st.write("")
         st.write("")
-        st.markdown("<h2 style='text-align: center;'>🔐 Faculty of Computing Quiz Portal Login</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>🔐 Faculty Quiz Portal Login</h2>", unsafe_allow_html=True)
         
         with st.form("login_form", clear_on_submit=False):
             input_username = st.text_input("Username").strip()
@@ -177,18 +190,30 @@ if not st.session_state.authenticated:
                 if not input_username or not input_password:
                     st.error("Please enter both username and password fields.")
                 else:
-                    with st.spinner("Checking portal records..."):
-                        users_df = fetch_users_from_github()
+                    with st.spinner("Verifying device concurrency restrictions..."):
+                        users_df = fetch_users_from_github_live()
                         
                         matched_user = users_df[(users_df["username"] == input_username) & (users_df["password"] == input_password)]
                         
                         if not matched_user.empty:
-                            st.session_state.authenticated = True
-                            # Capture and store the user's explicit department assignment
-                            st.session_state.user_team = matched_user.iloc[0]["team"]
-                            st.success(f"Access Granted! Welcome, {input_username}.")
-                            time.sleep(0.5)
-                            st.rerun()
+                            current_login_state = matched_user.iloc[0]["is_logged_in"]
+                            assigned_team = matched_user.iloc[0]["team"]
+                            
+                            # 🔒 BLOCK CONCURRENT SESSIONS (Allow 'All'/Admin accounts to bypass if necessary)
+                            if current_login_state == 1 and assigned_team not in ["All", "Admin"]:
+                                st.error(f"🚫 Login Blocked: Someone from '{assigned_team}' is already logged into the quiz hardware system elsewhere.")
+                            else:
+                                # Lock user slot immediately on GitHub repository layer
+                                st.session_state.authenticated = True
+                                st.session_state.current_user = input_username
+                                st.session_state.user_team = assigned_team
+                                
+                                if assigned_team not in ["All", "Admin"]:
+                                    update_user_login_status(input_username, 1)
+                                    
+                                st.success(f"Access Granted! Welcome, {input_username}.")
+                                time.sleep(0.5)
+                                st.rerun()
                         else:
                             st.error("❌ Invalid Username or Password. Please try again.")
     st.stop()  
@@ -267,7 +292,7 @@ def terminate_active_round():
             st.session_state.completed_rounds.append(round_log_entry)
             
             df_scores_push = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
-            df_rounds_push = pd.DataFrame(st.session_state.completed_rounds, columns=["Team", "Subject", "Quiz Stage", "Points Scored"])
+            df_rounds_push = pd.DataFrame(st.session_state.completed_rounds, columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
             
             push_file_to_github(SCORES_FILE, df_scores_push, f"Update total scores: {team}")
             push_file_to_github(ROUNDS_FILE, df_rounds_push, f"Log match activity entry: {team}")
@@ -279,12 +304,14 @@ def terminate_active_round():
         st.session_state.round_subject = None
 
 # --- UI MAIN LAYOUT ---
-st.title("🏆 Faculty of Computing Quiz Competition")
-
-# Sidebar profile info & Sign out
 st.sidebar.markdown(f"👤 Logged in Department: **{st.session_state.user_team}**")
+
+# Cleanly unbind tracking states upon intentional log out
 if st.sidebar.button("🔒 Sign Out of Session", use_container_width=True):
+    if st.session_state.user_team not in ["All", "Admin"]:
+        update_user_login_status(st.session_state.current_user, 0)
     st.session_state.authenticated = False
+    st.session_state.current_user = None
     st.session_state.user_team = None
     st.rerun()
 
@@ -307,14 +334,9 @@ allowed_count = stage_configurations[selected_stage_label]["cutoff"]
 
 eligible_teams = ranked_team_list[:allowed_count]
 
-# -----------------------------------------------------------------
-# 🔒 ENFORCED DEPARTMENT VALIDATION FILTER LAYER
-# -----------------------------------------------------------------
-# Define global bypass tags
-if st.session_state.user_team in ["All", "Admin", "SuperAdmin"]:
+if st.session_state.user_team in ["All", "Admin"]:
     filtered_teams = eligible_teams
 else:
-    # Retain only the user's specific assigned team if it is qualified for this stage
     filtered_teams = [team for team in eligible_teams if str(team).lower() == str(st.session_state.user_team).lower()]
 
 if filtered_teams:
@@ -324,8 +346,8 @@ if filtered_teams:
     else:
         chosen_team = st.sidebar.selectbox("Select Active Team", filtered_teams)
 else:
-    if st.session_state.user_team not in ["All", "Admin", "SuperAdmin"]:
-        st.sidebar.error(f"❌ Your department ({st.session_state.user_team}) did not qualify for this Quiz level.")
+    if st.session_state.user_team not in ["All", "Admin"]:
+        st.sidebar.error(f"❌ Your department ({st.session_state.user_team}) did not qualify for this bracket level.")
     else:
         st.sidebar.error("No eligible tournament teams found.")
     chosen_team = None
