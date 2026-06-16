@@ -25,7 +25,7 @@ REPO_NAME = "faculty_of_com_quiz"
 SCORES_FILE = "scores.csv"
 ROUNDS_FILE = "completed_rounds.csv"
 TEAMS_FILE = "team.csv"
-USERS_FILE = "users.csv"  
+USERS_FILE = "user_teams.csv"  
 LOGO_FILE = "logo.png"
 BRANCH = "main"
 
