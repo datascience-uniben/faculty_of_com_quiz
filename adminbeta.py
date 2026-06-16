@@ -21,6 +21,7 @@ REPO_NAME = "faculty_of_com_quiz"
 SCORES_FILE = "scores.csv"
 ROUNDS_FILE = "completed_rounds.csv"
 TEAMS_FILE = "team.csv"
+USERS_FILE = "users.csv"  # <-- Tracked for security overrides
 BRANCH = "main"
 
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
@@ -30,8 +31,7 @@ HEADERS = {
 }
 
 def load_allowed_teams():
-    """Attempts to pull active team definitions dynamically from GitHub 
-    to ensure deployment environments stay synchronized."""
+    """Attempts to pull active team definitions dynamically from GitHub."""
     url_teams = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{TEAMS_FILE}"
     try:
         res = requests.get(url_teams, headers=HEADERS, params={"ref": BRANCH})
@@ -45,7 +45,6 @@ def load_allowed_teams():
     except Exception:
         pass
         
-    # Local fallback file check if API request encounters failure parameters
     if os.path.exists(TEAMS_FILE):
         try:
             df = pd.read_csv(TEAMS_FILE)
@@ -187,9 +186,39 @@ def render_live_monitoring_view():
 render_live_monitoring_view()
 
 # -----------------------------------------------------------------
-# ADMIN REMOTE DANGER DESTRUCTION CONTROL PANEL
+# ADMIN CONTROL PANEL & SECURITY MANAGEMENT
 # -----------------------------------------------------------------
 st.sidebar.header("⚠️ Admin Control Panel")
+
+# 🔓 EMERGENCY OVERRIDE BUTTON (Clears concurrent hardware/tab blocks)
+if st.sidebar.button("🔓 Clear Active Session Locks", use_container_width=True):
+    with st.spinner("Flushing authentication matrices..."):
+        url_users = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{USERS_FILE}"
+        res = requests.get(url_users, headers=HEADERS, params={"ref": BRANCH})
+        if res.status_code == 200:
+            content = base64.b64decode(res.json()["content"]).decode("utf-8")
+            df_u = pd.read_csv(StringIO(content))
+            df_u.columns = [str(col).strip().lower() for col in df_u.columns]
+            
+            if "is_logged_in" in df_u.columns:
+                df_u["is_logged_in"] = 0  # Force clear all lockout tracking counters
+                csv_str = df_u.to_csv(index=False)
+                encoded = base64.b64encode(csv_str.encode("utf-8")).decode("utf-8")
+                sha = res.json().get("sha")
+                
+                p_load = {"message": "🔓 Administrative Session Lock Override", "content": encoded, "branch": BRANCH, "sha": sha}
+                requests.put(url_users, headers=HEADERS, data=json.dumps(p_load))
+                st.sidebar.success("All hardware login locks cleared! 🔓")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.sidebar.error("Error: 'is_logged_in' column not found in users.csv")
+        else:
+            st.sidebar.error("Could not fetch user file from GitHub.")
+
+st.sidebar.write("---")
+
+# 💥 HARD DATA RESET CONTROLS
 if "confirm_reset" not in st.session_state:
     st.session_state.confirm_reset = False
 
