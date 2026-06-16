@@ -4,7 +4,7 @@ import requests
 import base64
 import json
 import time
-import os  
+import os  # <-- Fixed: Added missing import to resolve NameError
 from datetime import datetime
 from io import StringIO
 
@@ -21,7 +21,6 @@ REPO_NAME = "faculty_of_com_quiz"
 SCORES_FILE = "scores.csv"
 ROUNDS_FILE = "completed_rounds.csv"
 TEAMS_FILE = "team.csv"
-USERS_FILE = "users.csv"  
 BRANCH = "main"
 
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
@@ -31,7 +30,8 @@ HEADERS = {
 }
 
 def load_allowed_teams():
-    """Attempts to pull active team definitions dynamically from GitHub."""
+    """Attempts to pull active team definitions dynamically from GitHub 
+    to ensure deployment environments stay synchronized."""
     url_teams = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{TEAMS_FILE}"
     try:
         res = requests.get(url_teams, headers=HEADERS, params={"ref": BRANCH})
@@ -45,6 +45,7 @@ def load_allowed_teams():
     except Exception:
         pass
         
+    # Local fallback file check if API request encounters failure parameters
     if os.path.exists(TEAMS_FILE):
         try:
             df = pd.read_csv(TEAMS_FILE)
@@ -70,12 +71,6 @@ def load_dashboard_data_from_github():
     if res_scores.status_code == 200:
         content = base64.b64decode(res_scores.json()["content"]).decode("utf-8")
         df_scores = pd.read_csv(StringIO(content))
-        # Standardize score columns
-        df_scores.columns = [str(c).strip().lower() for c in df_scores.columns]
-        team_header = "team" if "team" in df_scores.columns else df_scores.columns[0]
-        score_header = "total score" if "total score" in df_scores.columns else df_scores.columns[1]
-        
-        df_scores = df_scores.rename(columns={team_header: "Team", score_header: "Total Score"})
         df_scores["Team"] = df_scores["Team"].astype(str)
     else:
         df_scores = pd.DataFrame(list({t: 0 for t in ALL_TEAMS}.items()), columns=["Team", "Total Score"])
@@ -96,6 +91,8 @@ def load_dashboard_data_from_github():
     if res_rounds.status_code == 200:
         content = base64.b64decode(res_rounds.json()["content"]).decode("utf-8")
         df_rounds = pd.read_csv(StringIO(content))
+        df_rounds["Team"] = df_rounds["Team"].astype(str)
+        df_rounds = df_rounds[df_rounds["Team"].isin(ALL_TEAMS)]
     else:
         df_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
         
@@ -152,39 +149,14 @@ def render_live_monitoring_view():
     with col2:
         st.subheader("📊 Round-by-Round Numerical Breakdown")
         
-        # 🌟 SAFE FILTER: Normalize columns to lowercase to prevent matching KeyErrors
-        df_rounds.columns = [str(c).strip().lower() for c in df_rounds.columns]
-        
         matrix_data = []
         for team in ALL_TEAMS:
-            team_col = "team" if "team" in df_rounds.columns else df_rounds.columns[0] if not df_rounds.empty else None
-            if team_col:
-                team_logs = df_rounds[df_rounds[team_col].astype(str).str.lower() == str(team).lower()]
-            else:
-                team_logs = pd.DataFrame()
+            team_logs = df_rounds[df_rounds["Team"] == team]
             
             def extract_round_score(round_str):
-                if team_logs.empty:
-                    return "⏳ Pending"
-                
-                # Dynamically locate structural stage/point columns
-                stage_col = None
-                for possible_name in ["bracket stage", "bracket, stage", "stage", "round", "bracket"]:
-                    if possible_name in df_rounds.columns:
-                        stage_col = possible_name
-                        break
-                        
-                score_col = None
-                for possible_name in ["points scored", "points", "score", "score points"]:
-                    if possible_name in df_rounds.columns:
-                        score_col = possible_name
-                        break
-
-                if stage_col and score_col:
-                    match_row = team_logs[team_logs[stage_col].astype(str).str.lower() == round_str.lower()]
-                    if not match_row.empty:
-                        return f"{match_row.iloc[0][score_col]} pts"
-                        
+                match_row = team_logs[team_logs["Bracket Stage"] == round_str]
+                if not match_row.empty:
+                    return f"{match_row.iloc[0].get('Points Scored', '✅')} pts"
                 return "⏳ Pending"
 
             total_pts = df_scores[df_scores["Team"] == team]["Total Score"].values[0] if not df_scores[df_scores["Team"] == team].empty else 0
@@ -215,39 +187,9 @@ def render_live_monitoring_view():
 render_live_monitoring_view()
 
 # -----------------------------------------------------------------
-# ADMIN CONTROL PANEL & SECURITY MANAGEMENT
+# ADMIN REMOTE DANGER DESTRUCTION CONTROL PANEL
 # -----------------------------------------------------------------
 st.sidebar.header("⚠️ Admin Control Panel")
-
-# 🔓 OVERRIDE BUTTON: Clear concurrent login tab/hardware locks
-if st.sidebar.button("🔓 Clear Active Session Locks", use_container_width=True):
-    with st.spinner("Flushing authentication matrices..."):
-        url_users = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{USERS_FILE}"
-        res = requests.get(url_users, headers=HEADERS, params={"ref": BRANCH})
-        if res.status_code == 200:
-            content = base64.b64decode(res.json()["content"]).decode("utf-8")
-            df_u = pd.read_csv(StringIO(content))
-            df_u.columns = [str(col).strip().lower() for col in df_u.columns]
-            
-            if "is_logged_in" in df_u.columns:
-                df_u["is_logged_in"] = 0  
-                csv_str = df_u.to_csv(index=False)
-                encoded = base64.b64encode(csv_str.encode("utf-8")).decode("utf-8")
-                sha = res.json().get("sha")
-                
-                p_load = {"message": "🔓 Administrative Session Lock Override", "content": encoded, "branch": BRANCH, "sha": sha}
-                requests.put(url_users, headers=HEADERS, data=json.dumps(p_load))
-                st.sidebar.success("All hardware login locks cleared! 🔓")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.sidebar.error("Error: 'is_logged_in' column not found in users.csv")
-        else:
-            st.sidebar.error("Could not fetch user file from GitHub.")
-
-st.sidebar.write("---")
-
-# 💥 HARD DATA RESET CONTROLS
 if "confirm_reset" not in st.session_state:
     st.session_state.confirm_reset = False
 
