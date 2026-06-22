@@ -100,13 +100,13 @@ def render_live_monitoring_view():
     df_scores, df_rounds = load_dashboard_data_from_github()
     ranked_teams = df_scores["Team"].tolist()
 
-    st.subheader("🏁 Turn-Based Match Bracket Status")
+    st.subheader("🏁 Interleaved Match Elimination Tracker")
     stages_meta = [
         {"title": "Round 1 (All Teams)", "cutoff": len(ALL_TEAMS)},
         {"title": "Round 2 (Top 5)", "cutoff": 5},
         {"title": "Round 3 (Top 4)", "cutoff": 4},
         {"title": "Round 4 (Top 3)", "cutoff": 3},
-        {"title": "💥 Tie-Breakers (2 Draws)", "cutoff": len(ALL_TEAMS)}
+        {"title": "💥 Round 5 (Sudden Death)", "cutoff": len(ALL_TEAMS)}
     ]
     
     cols = st.columns(5)
@@ -117,16 +117,17 @@ def render_live_monitoring_view():
                 borderline_team = ranked_teams[cutoff - 1]
                 st.metric(label=stage["title"], value="Active Bracket", delta=f"Cutoff: Team {borderline_team}")
             else:
-                st.metric(label=stage["title"], value="Active Mode" if i==4 else "Calculating...")
+                st.metric(label=stage["title"], value="Sudden-Death Ready" if i==4 else "Calculating...")
                 
     st.write("---")
     
     col1, col2 = st.columns([1, 1.4], gap="large")
     
     with col1:
-        st.subheader("🏆 Live Leaderboard Standings")
-        if not df_scores.empty and df_scores.iloc[0]["Total Score"] > 0:
-            st.success(f"🌟 **Current Leader:** Team {df_scores.iloc[0]['Team']} ({df_scores.iloc[0]['Total Score']} pts)")
+        st.subheader("🏆 Leaderboard Standings Matrix")
+        if not df_scores.empty and len(df_scores) > 1:
+            st.success(f"⭐ **Current Leader:** Team {df_scores.iloc[0]['Team']} ({df_scores.iloc[0]['Total Score']} pts)")
+            st.error(f"🚨 **Bottom Tier (Removal Zone):** Team {df_scores.iloc[-1]['Team']} ({df_scores.iloc[-1]['Total Score']} pts)")
             
         st.dataframe(
             df_scores.set_index("Team"), 
@@ -135,7 +136,7 @@ def render_live_monitoring_view():
         )
         
     with col2:
-        st.subheader("📊 Performance Matrix (Including Tie-Breakers)")
+        st.subheader("📊 Category Performance Tracking Matrix")
         df_rounds.columns = [str(c).strip().lower() for c in df_rounds.columns]
         
         team_col = "team" if "team" in df_rounds.columns else (df_rounds.columns[0] if not df_rounds.empty else None)
@@ -187,7 +188,7 @@ render_live_monitoring_view()
 # --- ADMIN PANEL CONTROL BUTTONS ---
 st.sidebar.header("⚠️ Admin Control Panel")
 if st.sidebar.button("🔓 Clear Active Session Locks", use_container_width=True):
-    with st.spinner("Flushing authentication states..."):
+    with st.spinner("Flushing hardware states..."):
         url_users = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{USERS_FILE}"
         res = requests.get(url_users, headers=HEADERS, params={"ref": BRANCH})
         if res.status_code == 200:
@@ -199,7 +200,7 @@ if st.sidebar.button("🔓 Clear Active Session Locks", use_container_width=True
                 csv_str = df_u.to_csv(index=False)
                 encoded = base64.b64encode(csv_str.encode("utf-8")).decode("utf-8")
                 sha = res.json().get("sha")
-                p_load = {"message": "🔓 Lock Reset", "content": encoded, "branch": BRANCH, "sha": sha}
+                p_load = {"message": "🔓 Lock Override", "content": encoded, "branch": BRANCH, "sha": sha}
                 requests.put(url_users, headers=HEADERS, data=json.dumps(p_load))
                 st.sidebar.success("Locks released!")
                 time.sleep(0.5)
@@ -226,7 +227,7 @@ else:
             encoded = base64.b64encode(csv_str.encode("utf-8")).decode("utf-8")
             res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
             sha = res.json().get("sha") if res.status_code == 200 else None
-            p_load = {"message": "💥 Admin Reset Wipe", "content": encoded, "branch": BRANCH}
+            p_load = {"message": "💥 Admin Wipe", "content": encoded, "branch": BRANCH}
             if sha: p_load["sha"] = sha
             requests.put(url, headers=HEADERS, data=json.dumps(p_load))
 
