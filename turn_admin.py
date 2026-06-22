@@ -130,7 +130,6 @@ def render_live_monitoring_view():
                 st.metric(label=stage["title"], value="Sudden-Death Ready" if i==4 else "Calculating...")
                 
     st.write("---")
-    
     col1, col2 = st.columns([1, 1.4], gap="large")
     
     with col1:
@@ -138,12 +137,11 @@ def render_live_monitoring_view():
         if not df_scores.empty and len(df_scores) > 1:
             st.success(f"⭐ **Current Leader:** Team {df_scores.iloc[0]['Team']} ({df_scores.iloc[0]['Total Score']} pts)")
             
-            # Identify the least team cleanly
-            least_team = df_scores.iloc[-1]["Team"]
-            least_score = df_scores.iloc[-1]["Total Score"]
+            least_row_index = len(df_scores) - 1
+            least_team = df_scores.iloc[least_row_index]["Team"]
+            least_score = df_scores.iloc[least_row_index]["Total Score"]
             st.error(f"🚨 **Elimination Zone:** Team {least_team} is last with {least_score} pts")
             
-            # Dynamic Elimination Button
             st.markdown("### ❌ Active Round Elimination")
             if st.button(f"💥 Eliminate Team {least_team} from Next Round", type="primary", use_container_width=True):
                 updated_teams = [t for t in ALL_TEAMS if str(t) != str(least_team)]
@@ -241,7 +239,6 @@ else:
     st.sidebar.error("❗ PERMANENTLY WIPE DATABASE?")
     col_yes, col_no = st.sidebar.columns(2)
     if col_yes.button("Yes, Wipe", type="primary", use_container_width=True):
-        # Default initialization fallback for team structure reset
         fresh_scores = pd.DataFrame(list({"A":0,"B":0,"C":0,"D":0,"E":0,"F":0}.items()), columns=["Team", "Total Score"])
         fresh_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
         fresh_taken = pd.DataFrame({"question": ["_initialization_placeholder_"]}) 
