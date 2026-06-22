@@ -44,7 +44,6 @@ BASE_SUBJECTS = {
 # GITHUB API REMOTE STORAGE ENGINES
 # -------------------------------
 def push_file_to_github(file_path, dataframe, commit_message):
-    """Pushes a pandas DataFrame safely into the repository using the GitHub API."""
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{file_path}"
     csv_string = dataframe.to_csv(index=False)
     encoded_content = base64.b64encode(csv_string.encode("utf-8")).decode("utf-8")
@@ -116,7 +115,6 @@ def sync_rounds_from_github():
     return []
 
 def sync_taken_questions_from_github():
-    """Fetches global list of taken questions while avoiding EmptyDataError crashes."""
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{TAKEN_QUESTIONS_FILE}"
     res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
     if res.status_code == 200:
@@ -185,8 +183,6 @@ def set_question_pool(subject_key, round_number):
 
     for q in raw_questions:
         q_text = str(get_csv_value(q, ['question', 'q', 'text'])).strip()
-        
-        # Cross-team exclusive verification layer
         if q_text in globally_taken_questions or q_text == "_initialization_placeholder_":
             continue
 
@@ -205,7 +201,6 @@ def set_question_pool(subject_key, round_number):
     st.session_state.question_pool = cleaned_pool
 
 def draw_random_question():
-    """Draws a unique question and safely posts it to the global repository registry."""
     if st.session_state.question_pool:
         q = st.session_state.question_pool.pop()
         st.session_state.current_question = q
@@ -239,12 +234,14 @@ def terminate_active_round():
         subject = st.session_state.round_subject
         r_num = st.session_state.active_round_num
         
-        round_log_entry = [team, subject, f"Round {r_num}", int(st.session_state.round_score)]
+        bracket_label = f"Round {r_num} Tie-Breaker" if r_num == 5 else f"Round {r_num}"
+        round_log_entry = [team, subject, bracket_label, int(st.session_state.round_score)]
+        
         st.session_state.scores = sync_scores_from_github()
         st.session_state.completed_rounds = sync_rounds_from_github()
         
         existing_runs = [[str(row[0]), str(row[1]), str(row[2])] for row in st.session_state.completed_rounds]
-        if [team, subject, f"Round {r_num}"] not in existing_runs:
+        if [team, subject, bracket_label] not in existing_runs:
             st.session_state.scores[team] = st.session_state.scores.get(team, 0) + st.session_state.round_score
             st.session_state.completed_rounds.append(round_log_entry)
             
@@ -279,20 +276,22 @@ ranked_team_list = [team for team, score in sorted_standings if team in ALL_TEAM
 st.sidebar.header("Tournament Progression Panel")
 total_teams_count = len(ALL_TEAMS)
 stage_configurations = {
-    f"Round 1: Preliminary (All {total_teams_count} Teams)": {"round": 1, "cutoff": total_teams_count},
-    "Round 2: Quarter-Final (Best 5)": {"round": 2, "cutoff": min(5, total_teams_count)},
-    "Round 3: Semi-Final (Best 4)": {"round": 3, "cutoff": min(4, total_teams_count)},
-    "Round 4: Third-Place Playoff (Best 3)": {"round": 4, "cutoff": min(3, total_teams_count)},
-    "Round 5: Grand Finale (Best 2)": {"round": 5, "cutoff": min(2, total_teams_count)}
+    f"Round 1: Preliminary (All {total_teams_count} Teams)": {"round": 1, "cutoff": total_teams_count, "limit": 4},
+    "Round 2: Quarter-Final (Best 5)": {"round": 2, "cutoff": min(5, total_teams_count), "limit": 4},
+    "Round 3: Semi-Final (Best 4)": {"round": 3, "cutoff": min(4, total_teams_count), "limit": 4},
+    "Round 4: Third-Place Playoff (Best 3)": {"round": 4, "cutoff": min(3, total_teams_count), "limit": 4},
+    "💥 Round 5: Sudden-Death Tie-Breaker (2 Draws)": {"round": 5, "cutoff": total_teams_count, "limit": 2}
 }
 
 selected_stage_label = st.sidebar.selectbox("Active Match Bracket", list(stage_configurations.keys()))
 current_round_id = stage_configurations[selected_stage_label]["round"]
 allowed_count = stage_configurations[selected_stage_label]["cutoff"]
+# 🌟 DYNAMIC LIMIT LAYER: Sets maximum allowed questions to 2 for Round 5 tie-breakers
+max_questions_allowed = stage_configurations[selected_stage_label]["limit"]
 
-eligible_teams = ranked_team_list[:allowed_count]
+eligible_teams = ranked_team_list[:allowed_count] if current_round_id != 5 else ALL_TEAMS
 if eligible_teams:
-    st.sidebar.markdown(f"**Qualified for this stage:** `{', '.join(eligible_teams)}`")
+    st.sidebar.markdown(f"**Eligible/Qualified Teams:** `{', '.join(eligible_teams)}`")
     chosen_team = st.sidebar.selectbox("Select Active Team", eligible_teams)
 else:
     st.sidebar.error("No eligible teams found.")
@@ -301,13 +300,14 @@ else:
 chosen_subject = st.sidebar.selectbox("Choose Subject Area", list(BASE_SUBJECTS.keys()))
 
 is_already_played = False
+target_label = f"Round {current_round_id} Tie-Breaker" if current_round_id == 5 else f"Round {current_round_id}"
 if chosen_team:
     for row in st.session_state.completed_rounds:
-        if str(row[0]) == str(chosen_team) and str(row[1]) == str(chosen_subject) and str(row[2]) == f"Round {current_round_id}":
+        if str(row[0]) == str(chosen_team) and str(row[1]) == str(chosen_subject) and str(row[2]) == target_label:
             is_already_played = True
 
 if is_already_played:
-    st.sidebar.error(f"🚫 {chosen_team} has already completed {chosen_subject} for Round {current_round_id}!")
+    st.sidebar.error(f"🚫 {chosen_team} has already completed {chosen_subject} for this segment!")
 
 if st.sidebar.button("🚀 Open Turn-Based Session", disabled=(st.session_state.round_active or is_already_played or not chosen_team)):
     start_turn_round(chosen_team, chosen_subject, current_round_id)
@@ -315,16 +315,20 @@ if st.sidebar.button("🚀 Open Turn-Based Session", disabled=(st.session_state.
 
 # --- GAMEPLAY INTERACTION PANELS ---
 if st.session_state.round_active and st.session_state.round_team:
-    st.markdown(f"### 🎯 Team **{st.session_state.round_team}** Turn Session — {st.session_state.round_subject} (Round {st.session_state.active_round_num})")
+    round_header = f"Round {st.session_state.active_round_num} Tie-Breaker" if st.session_state.active_round_num == 5 else f"Round {st.session_state.active_round_num}"
+    st.markdown(f"### 🎯 Team **{st.session_state.round_team}** Turn Session — {st.session_state.round_subject} ({round_header})")
+    
+    # 🌟 Updates target boundary to match either 2 or 4 draws
+    current_limit = 2 if st.session_state.active_round_num == 5 else 4
     
     c1, c2 = st.columns(2)
-    c1.metric(label="Questions Attempted", value=f"{st.session_state.questions_answered_this_round} / 4")
+    c1.metric(label="Questions Attempted", value=f"{st.session_state.questions_answered_this_round} / {current_limit}")
     c2.metric(label="Points Earned This Turn", value=f"{st.session_state.round_score} pts")
     
     st.write("---")
 
     if not st.session_state.has_drawn_question:
-        st.info("💡 Ready for your turn? Click the button below to draw an unpicked random question from the pool. **(30s timer)**")
+        st.info(f"💡 Click below to draw a question. You have **{current_limit} total draws** for this phase.")
         if st.button("🎲 Draw Next Question", type="primary"):
             draw_random_question()
             st.rerun()
@@ -339,7 +343,7 @@ if st.session_state.round_active and st.session_state.round_team:
             st.session_state.has_drawn_question = False
             st.session_state.current_question = None
             
-            if st.session_state.questions_answered_this_round >= 4:
+            if st.session_state.questions_answered_this_round >= current_limit:
                 terminate_active_round()
                 st.info("Turn closed out automatically.")
             st.rerun()
@@ -354,7 +358,7 @@ if st.session_state.round_active and st.session_state.round_team:
             q = st.session_state.current_question
             if q:
                 st.markdown(f"#### **Question Context:**\n> {q['question']}")
-                options = [f"A: {q.get('optiona','N/A')}", f"B: {q.get('optionb','N/A')}", f"C: {q.get('optionc','N/A')}", f"D: {q.get('optiond','N/A')}", f"E: {q.get('optione','N/A')}"]
+                options = [f"A: {q.get('optiona','N/A')}", f"B: {q.get('optionb','N/A')}", f"C: {q.get('optionb','N/A')}", f"D: {q.get('optiond','N/A')}", f"E: {q.get('optione','N/A')}"]
                 choice = st.radio("Choose Your Team's Definitive Answer:", options, index=None, key=f"q_{st.session_state.questions_answered_this_round}")
                 
                 col1, col2 = st.columns([1, 4])
@@ -371,9 +375,9 @@ if st.session_state.round_active and st.session_state.round_team:
                             st.session_state.has_drawn_question = False
                             st.session_state.current_question = None
                             
-                            if st.session_state.questions_answered_this_round >= 4:
+                            if st.session_state.questions_answered_this_round >= current_limit:
                                 terminate_active_round()
-                                st.success("🎉 Target of 4 questions reached!")
+                                st.success("🎉 Target draws reached!")
                                 time.sleep(1.5)
                             st.rerun()
                         else:
@@ -384,7 +388,7 @@ if st.session_state.round_active and st.session_state.round_team:
                         st.session_state.has_drawn_question = False
                         st.session_state.current_question = None
                         
-                        if st.session_state.questions_answered_this_round >= 4:
+                        if st.session_state.questions_answered_this_round >= current_limit:
                             terminate_active_round()
                             st.info("Turn closed out following a skipped submission limit.")
                             time.sleep(1.5)
@@ -398,7 +402,7 @@ if st.session_state.round_active and st.session_state.round_team:
             time.sleep(0.1)
             st.rerun()
 
-# --- STANDINGS Display ---
+# --- STANDINGS SCREEN DISPLAY ---
 st.write("---")
 st.subheader("📊 Live Leaderboard")
 scores_df = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
