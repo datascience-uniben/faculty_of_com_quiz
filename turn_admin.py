@@ -95,6 +95,16 @@ def load_dashboard_data_from_github():
         
     return df_scores, df_rounds
 
+def push_file_to_github(file_path, dataframe, commit_message):
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{file_path}"
+    csv_string = dataframe.to_csv(index=False)
+    encoded_content = base64.b64encode(csv_string.encode("utf-8")).decode("utf-8")
+    response = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
+    file_sha = response.json().get("sha") if response.status_code == 200 else None
+    payload = {"message": commit_message, "content": encoded_content, "branch": BRANCH}
+    if file_sha: payload["sha"] = file_sha
+    return requests.put(url, headers=HEADERS, data=json.dumps(payload)).status_code in [200, 201]
+
 @st.fragment(run_every=4.0) 
 def render_live_monitoring_view():
     df_scores, df_rounds = load_dashboard_data_from_github()
@@ -127,7 +137,21 @@ def render_live_monitoring_view():
         st.subheader("🏆 Leaderboard Standings Matrix")
         if not df_scores.empty and len(df_scores) > 1:
             st.success(f"⭐ **Current Leader:** Team {df_scores.iloc[0]['Team']} ({df_scores.iloc[0]['Total Score']} pts)")
-            st.error(f"🚨 **Bottom Tier (Removal Zone):** Team {df_scores.iloc[-1]['Team']} ({df_scores.iloc[-1]['Total Score']} pts)")
+            
+            # Identify the least team cleanly
+            least_team = df_scores.iloc[-1]["Team"]
+            least_score = df_scores.iloc[-1]["Total Score"]
+            st.error(f"🚨 **Elimination Zone:** Team {least_team} is last with {least_score} pts")
+            
+            # Dynamic Elimination Button
+            st.markdown("### ❌ Active Round Elimination")
+            if st.button(f"💥 Eliminate Team {least_team} from Next Round", type="primary", use_container_width=True):
+                updated_teams = [t for t in ALL_TEAMS if str(t) != str(least_team)]
+                df_teams_new = pd.DataFrame({"Teams": updated_teams})
+                if push_file_to_github(TEAMS_FILE, df_teams_new, f"Eliminated least team: {least_team}"):
+                    st.success(f"Team {least_team} has been removed from `team.csv`!")
+                    time.sleep(1.0)
+                    st.rerun()
             
         st.dataframe(
             df_scores.set_index("Team"), 
@@ -217,9 +241,11 @@ else:
     st.sidebar.error("❗ PERMANENTLY WIPE DATABASE?")
     col_yes, col_no = st.sidebar.columns(2)
     if col_yes.button("Yes, Wipe", type="primary", use_container_width=True):
-        fresh_scores = pd.DataFrame(list({t: 0 for t in ALL_TEAMS}.items()), columns=["Team", "Total Score"])
+        # Default initialization fallback for team structure reset
+        fresh_scores = pd.DataFrame(list({"A":0,"B":0,"C":0,"D":0,"E":0,"F":0}.items()), columns=["Team", "Total Score"])
         fresh_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
         fresh_taken = pd.DataFrame({"question": ["_initialization_placeholder_"]}) 
+        fresh_teams = pd.DataFrame({"Teams": ["A", "B", "C", "D", "E", "F"]})
         
         def api_wipe(path, df):
             url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{path}"
@@ -227,13 +253,14 @@ else:
             encoded = base64.b64encode(csv_str.encode("utf-8")).decode("utf-8")
             res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
             sha = res.json().get("sha") if res.status_code == 200 else None
-            p_load = {"message": "💥 Admin Wipe", "content": encoded, "branch": BRANCH}
+            p_load = {"message": "💥 Admin Wipe Reset", "content": encoded, "branch": BRANCH}
             if sha: p_load["sha"] = sha
             requests.put(url, headers=HEADERS, data=json.dumps(p_load))
 
         api_wipe(SCORES_FILE, fresh_scores)
         api_wipe(ROUNDS_FILE, fresh_rounds)
         api_wipe(TAKEN_QUESTIONS_FILE, fresh_taken) 
+        api_wipe(TEAMS_FILE, fresh_teams)
         st.session_state.confirm_reset = False
         st.toast("GitHub records wiped clean! 🧹", icon="✅")
         time.sleep(0.5)
