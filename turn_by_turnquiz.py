@@ -7,6 +7,7 @@ import base64
 import requests
 import json
 from datetime import datetime
+from io import StringIO
 
 # -------------------------------
 # PAGE CONFIGURATION (MUST BE FIRST)
@@ -24,6 +25,7 @@ REPO_NAME = "faculty_of_com_quiz"
 SCORES_FILE = "scores.csv"
 ROUNDS_FILE = "completed_rounds.csv"
 TEAMS_FILE = "team.csv"
+TAKEN_QUESTIONS_FILE = "taken_questions.csv" # 🌟 New persistence file
 LOGO_FILE = "uniben.png"  
 BRANCH = "main"
 
@@ -33,7 +35,6 @@ HEADERS = {
     "Accept": "application/vnd.github.v3+json"
 }
 
-# 🌟 UPDATED: Contains both required subject categories
 BASE_SUBJECTS = {
     "Nigeria Current Affairs": "affairs",
     "General Computing & ICT": "ICT"
@@ -96,7 +97,6 @@ def sync_scores_from_github():
     res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
     if res.status_code == 200:
         content = base64.b64decode(res.json()["content"]).decode("utf-8")
-        from io import StringIO
         df = pd.read_csv(StringIO(content))
         return dict(zip(df["Team"].astype(str), df["Total Score"]))
     return {team: 0 for team in ALL_TEAMS}
@@ -106,8 +106,17 @@ def sync_rounds_from_github():
     res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
     if res.status_code == 200:
         content = base64.b64decode(res.json()["content"]).decode("utf-8")
-        from io import StringIO
         return pd.read_csv(StringIO(content)).values.tolist()
+    return []
+
+def sync_taken_questions_from_github():
+    """Fetches the global list of questions already answered across all teams."""
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{TAKEN_QUESTIONS_FILE}"
+    res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
+    if res.status_code == 200:
+        content = base64.b64decode(res.json()["content"]).decode("utf-8")
+        df = pd.read_csv(StringIO(content))
+        return df["question"].dropna().astype(str).tolist()
     return []
 
 # -------------------------------
@@ -146,6 +155,9 @@ if "question_start_time" not in st.session_state:
 def set_question_pool(subject_key, round_number):
     target_csv = f"{BASE_SUBJECTS[subject_key]}{round_number}.csv"
     raw_questions = load_questions(target_csv)
+    
+    # Sync globally blocked questions from repository
+    globally_taken_questions = sync_taken_questions_from_github()
     cleaned_pool = []
     
     if not raw_questions:
@@ -163,8 +175,14 @@ def set_question_pool(subject_key, round_number):
         return "N/A"
 
     for q in raw_questions:
+        q_text = str(get_csv_value(q, ['question', 'q', 'text'])).strip()
+        
+        # 🌟 EXCLUSION FILTER: If question is already in taken_questions.csv, bypass it completely
+        if q_text in globally_taken_questions:
+            continue
+
         standardized_q = {
-            'question': get_csv_value(q, ['question', 'q', 'text']),
+            'question': q_text,
             'optiona': get_csv_value(q, ['optiona', 'option a', 'a']),
             'optionb': get_csv_value(q, ['optionb', 'option b', 'b']),
             'optionc': get_csv_value(q, ['optionc', 'option c', 'c']),
@@ -176,16 +194,21 @@ def set_question_pool(subject_key, round_number):
         
     random.shuffle(cleaned_pool)
     st.session_state.question_pool = cleaned_pool
-    st.session_state.used_questions = []
 
 def draw_random_question():
-    """Picks one random question, removes it entirely from the pool, and logs the 30s timer start."""
+    """Picks one random question, removes it, and logs it persistently to GitHub repository."""
     if st.session_state.question_pool:
         q = st.session_state.question_pool.pop()
-        st.session_state.used_questions.append(q['question'])
         st.session_state.current_question = q
         st.session_state.has_drawn_question = True
-        st.session_state.question_start_time = time.time()  # Start the 30-second stopwatch
+        st.session_state.question_start_time = time.time()
+        
+        # 🌟 PERSISTENCE ENGINE: Append this question immediately to taken_questions.csv
+        globally_taken = sync_taken_questions_from_github()
+        if q['question'] not in globally_taken:
+            globally_taken.append(q['question'])
+            df_taken = pd.DataFrame(globally_taken, columns=["question"])
+            push_file_to_github(TAKEN_QUESTIONS_FILE, df_taken, f"Mark question as used: {st.session_state.round_team}")
     else:
         st.session_state.current_question = None
 
@@ -288,26 +311,22 @@ if st.sidebar.button("🚀 Open Turn-Based Session", disabled=(st.session_state.
 if st.session_state.round_active and st.session_state.round_team:
     st.markdown(f"### 🎯 Team **{st.session_state.round_team}** Turn Session — {st.session_state.round_subject} (Round {st.session_state.active_round_num})")
     
-    # Visual Tracking Metrics for Turn Rounds
     c1, c2 = st.columns(2)
     c1.metric(label="Questions Attempted", value=f"{st.session_state.questions_answered_this_round} / 4")
     c2.metric(label="Points Earned This Turn", value=f"{st.session_state.round_score} pts")
     
     st.write("---")
 
-    # Flow State Check: Team needs to pick/draw a question first
     if not st.session_state.has_drawn_question:
-        st.info("💡 Ready for your turn? Click the button below to draw a random question. You will have **30 seconds** to answer it.")
+        st.info("💡 Ready for your turn? Click the button below to draw an unpicked random question from the pool.")
         if st.button("🎲 Draw Next Question", type="primary"):
             draw_random_question()
             st.rerun()
             
     else:
-        # Calculate Remaining Time for the active question
         elapsed_time = time.time() - st.session_state.question_start_time
         remaining_seconds = max(0, 30 - int(elapsed_time))
         
-        # Check if the 30-second timer has run out
         if remaining_seconds <= 0:
             st.toast("⏰ Time ran out for this question!", icon="❌")
             st.session_state.questions_answered_this_round += 1
@@ -320,10 +339,9 @@ if st.session_state.round_active and st.session_state.round_team:
             st.rerun()
             
         else:
-            # Render remaining time warning
             st.progress(remaining_seconds / 30)
             if remaining_seconds <= 10:
-                st.error(f"⏰ **Time Remaining: {remaining_seconds} seconds! Hurry up!**")
+                st.error(f"⏰ **Time Remaining: {remaining_seconds} seconds!**")
             else:
                 st.warning(f"⏳ Time Remaining: **{remaining_seconds}** seconds")
 
@@ -337,22 +355,19 @@ if st.session_state.round_active and st.session_state.round_team:
                 with col1:
                     if st.button("Submit Answer", type="primary"):
                         if choice:
-                            # Check accuracy
                             if choice[0].upper() == str(q['answer']).strip().upper():
                                 st.session_state.round_score += 1
                                 st.toast("Correct! 🎉", icon="✅")
                             else:
                                 st.toast(f"Wrong! Correct was {q['answer']}", icon="❌")
                             
-                            # Increment progressive tracking indices
                             st.session_state.questions_answered_this_round += 1
                             st.session_state.has_drawn_question = False
                             st.session_state.current_question = None
                             
-                            # If 4 questions are met, close out the team's dashboard automatically
                             if st.session_state.questions_answered_this_round >= 4:
                                 terminate_active_round()
-                                st.success("🎉 Target of 4 questions reached! Turn metrics recorded.")
+                                st.success("🎉 Target of 4 questions reached!")
                                 time.sleep(1.5)
                             st.rerun()
                         else:
@@ -374,7 +389,6 @@ if st.session_state.round_active and st.session_state.round_team:
                     terminate_active_round()
                     st.rerun()
                     
-            # Small heartbeat pause to force Streamlit to rerun and dynamically update the countdown bar
             time.sleep(0.1)
             st.rerun()
 
@@ -394,4 +408,4 @@ if st.sidebar.button("🔄 Sync with Faculty QUIZ Data"):
 st.markdown("""<style>.quiz-footer { position: fixed; left: 0; bottom: 0; width: 100%; background-color: #0e1117; color: #e2e8f0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 15px 40px; font-size: 22px; font-weight: 600; border-top: 2px solid #262730; z-index: 999; } .footer-text-center { text-align: center; grid-column: 2; max-width: 1000px; } .footer-logo-right { grid-column: 3; justify-self: end; } .footer-logo-right img { height: 45px; width: auto; object-fit: contain; } .main .block-container { padding-bottom: 140px !important; max-width: 95% !important; }</style>""", unsafe_allow_html=True)
 logo_base64 = get_base64_image(LOGO_FILE)
 logo_container = f'<div class="footer-logo-right"><img src="data:image/png;base64,{logo_base64}" alt="Logo"></div>' if logo_base64 else '<div class="footer-logo-right"></div>'
-st.markdown(f'<div class="quiz-footer"><div class="footer-left-spacer"></div><div class="footer-text-center">Faculty of Computing Inter-department Quiz Competition • {datetime.now().year} • 📊 Completed Match Rounds Tally: {len(st.session_state.completed_rounds)}</div>{logo_container}</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="quiz-footer"><div class="footer-left-spacer"></div><div class="footer-text-center">Faculty of Computing Inter-department Quiz Competition • 2026 • 📊 Completed Match Rounds Tally: {len(st.session_state.completed_rounds)}</div>{logo_container}</div>', unsafe_allow_html=True)
