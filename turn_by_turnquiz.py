@@ -80,7 +80,7 @@ def get_base64_image(file_path):
             return base64.b64encode(f.read()).decode()
     return None
 
-@st.cache_data(ttl=10) 
+@st.cache_data(ttl=5) 
 def load_questions(file_name):
     try:
         df = pd.read_csv(file_name, encoding="cp1252")
@@ -129,39 +129,39 @@ def sync_taken_questions_from_github():
     return []
 
 # -------------------------------
-# SESSION STATE INITIALIZATION
+# INTERLEAVED STATE INITIALIZATION
 # -------------------------------
 if "scores" not in st.session_state:
     st.session_state.scores = sync_scores_from_github()
 if "completed_rounds" not in st.session_state:
     st.session_state.completed_rounds = sync_rounds_from_github()
-if "used_questions" not in st.session_state:
-    st.session_state.used_questions = []
-if "round_score" not in st.session_state:
-    st.session_state.round_score = 0
-if "round_active" not in st.session_state:
-    st.session_state.round_active = False
+if "stage_active" not in st.session_state:
+    st.session_state.stage_active = False
+if "current_stage_teams" not in st.session_state:
+    st.session_state.current_stage_teams = []
+if "team_rotation_index" not in st.session_state:
+    st.session_state.team_rotation_index = 0
+if "team_question_counts" not in st.session_state:
+    st.session_state.team_question_counts = {}  
+if "stage_running_scores" not in st.session_state:
+    st.session_state.stage_running_scores = {}
 if "current_question" not in st.session_state:
     st.session_state.current_question = None
-if "round_team" not in st.session_state:
-    st.session_state.round_team = None
-if "round_subject" not in st.session_state:
-    st.session_state.round_subject = None
-if "active_round_num" not in st.session_state:
-    st.session_state.active_round_num = 1
-if "question_pool" not in st.session_state:
-    st.session_state.question_pool = []
-if "questions_answered_this_round" not in st.session_state:
-    st.session_state.questions_answered_this_round = 0
 if "has_drawn_question" not in st.session_state:
     st.session_state.has_drawn_question = False
 if "question_start_time" not in st.session_state:
     st.session_state.question_start_time = None
+if "stage_round_num" not in st.session_state:
+    st.session_state.stage_round_num = 1
+if "stage_subject" not in st.session_state:
+    st.session_state.stage_subject = None
+if "question_pool" not in st.session_state:
+    st.session_state.question_pool = []
 
 # -------------------------------
-# CORE GAME ENGINE OPERATIONS
+# ROUND ROBIN OPERATIONS ENGINE
 # -------------------------------
-def set_question_pool(subject_key, round_number):
+def initialize_stage_pool(subject_key, round_number, qualified_teams):
     target_csv = f"{BASE_SUBJECTS[subject_key]}{round_number}.csv"
     raw_questions = load_questions(target_csv)
     globally_taken_questions = sync_taken_questions_from_github()
@@ -199,8 +199,39 @@ def set_question_pool(subject_key, round_number):
         
     random.shuffle(cleaned_pool)
     st.session_state.question_pool = cleaned_pool
+    
+    st.session_state.stage_active = True
+    st.session_state.current_stage_teams = qualified_teams
+    st.session_state.team_rotation_index = 0
+    st.session_state.stage_subject = subject_key
+    st.session_state.stage_round_num = round_number
+    st.session_state.team_question_counts = {team: 0 for team in qualified_teams}
+    st.session_state.stage_running_scores = {team: 0 for team in qualified_teams}
+    st.session_state.has_drawn_question = False
+    st.session_state.current_question = None
 
-def draw_random_question():
+def advance_to_next_team():
+    """Cycles seamlessly to the next eligible team requiring questions."""
+    teams = st.session_state.current_stage_teams
+    start_idx = st.session_state.team_rotation_index
+    total_needed = 2 if st.session_state.stage_round_num == 5 else 4
+    
+    all_done = all(st.session_state.team_question_counts[t] >= total_needed for t in teams)
+    if all_done:
+        terminate_interleaved_stage()
+        return
+
+    for i in range(len(teams)):
+        next_idx = (start_idx + 1 + i) % len(teams)
+        target_team = teams[next_idx]
+        if st.session_state.team_question_counts[target_team] < total_needed:
+            st.session_state.team_rotation_index = next_idx
+            st.session_state.has_drawn_question = False
+            st.session_state.current_question = None
+            st.session_state.question_start_time = None
+            return
+
+def draw_interleaved_question():
     if st.session_state.question_pool:
         q = st.session_state.question_pool.pop()
         st.session_state.current_question = q
@@ -211,54 +242,36 @@ def draw_random_question():
         if q['question'] not in globally_taken:
             globally_taken.append(q['question'])
             df_taken = pd.DataFrame(globally_taken, columns=["question"])
-            push_file_to_github(TAKEN_QUESTIONS_FILE, df_taken, f"Mark question as used: {st.session_state.round_team}")
+            current_active_team = st.session_state.current_stage_teams[st.session_state.team_rotation_index]
+            push_file_to_github(TAKEN_QUESTIONS_FILE, df_taken, f"Marked used by: {current_active_team}")
     else:
         st.session_state.current_question = None
 
-def start_turn_round(selected_team, selected_subject, round_number):
-    st.session_state.round_active = True
-    st.session_state.round_score = 0
-    st.session_state.questions_answered_this_round = 0
-    st.session_state.round_team = selected_team
-    st.session_state.round_subject = selected_subject
-    st.session_state.active_round_num = round_number
-    st.session_state.has_drawn_question = False
-    st.session_state.current_question = None
-    st.session_state.question_start_time = None
+def terminate_interleaved_stage():
+    st.session_state.scores = sync_scores_from_github()
+    st.session_state.completed_rounds = sync_rounds_from_github()
     
-    set_question_pool(selected_subject, round_number)
-
-def terminate_active_round():
-    if st.session_state.round_active:
-        team = st.session_state.round_team
-        subject = st.session_state.round_subject
-        r_num = st.session_state.active_round_num
-        
-        bracket_label = f"Round {r_num} Tie-Breaker" if r_num == 5 else f"Round {r_num}"
-        round_log_entry = [team, subject, bracket_label, int(st.session_state.round_score)]
-        
-        st.session_state.scores = sync_scores_from_github()
-        st.session_state.completed_rounds = sync_rounds_from_github()
-        
+    r_num = st.session_state.stage_round_num
+    subject = st.session_state.stage_subject
+    bracket_label = f"Round {r_num} Tie-Breaker" if r_num == 5 else f"Round {r_num}"
+    
+    for team, pts in st.session_state.stage_running_scores.items():
         existing_runs = [[str(row[0]), str(row[1]), str(row[2])] for row in st.session_state.completed_rounds]
         if [team, subject, bracket_label] not in existing_runs:
-            st.session_state.scores[team] = st.session_state.scores.get(team, 0) + st.session_state.round_score
-            st.session_state.completed_rounds.append(round_log_entry)
+            st.session_state.scores[team] = st.session_state.scores.get(team, 0) + pts
+            st.session_state.completed_rounds.append([team, subject, bracket_label, int(pts)])
             
-            df_scores_push = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
-            df_rounds_push = pd.DataFrame(st.session_state.completed_rounds, columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
-            
-            push_file_to_github(SCORES_FILE, df_scores_push, f"Update total scores: {team}")
-            push_file_to_github(ROUNDS_FILE, df_rounds_push, f"Log match activity entry: {team}")
-            st.toast("Scores uploaded to GitHub repository! 🚀", icon="✅")
-
-        st.session_state.round_active = False
-        st.session_state.current_question = None
-        st.session_state.round_team = None
-        st.session_state.round_subject = None
-        st.session_state.questions_answered_this_round = 0
-        st.session_state.has_drawn_question = False
-        st.session_state.question_start_time = None
+    df_scores_push = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
+    df_rounds_push = pd.DataFrame(st.session_state.completed_rounds, columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
+    
+    push_file_to_github(SCORES_FILE, df_scores_push, f"Batch Update Scores Round {r_num}")
+    push_file_to_github(ROUNDS_FILE, df_rounds_push, f"Batch Log Round {r_num} Entries")
+    
+    st.session_state.stage_active = False
+    st.session_state.current_question = None
+    st.session_state.has_drawn_question = False
+    st.success("🎉 Stage bracket complete! Standings pushed to GitHub database.")
+    time.sleep(2.0)
 
 # -------------------------------
 # USER INTERFACE SETUP
@@ -276,78 +289,57 @@ ranked_team_list = [team for team, score in sorted_standings if team in ALL_TEAM
 st.sidebar.header("Tournament Progression Panel")
 total_teams_count = len(ALL_TEAMS)
 stage_configurations = {
-    f"Round 1: Preliminary (All {total_teams_count} Teams)": {"round": 1, "cutoff": total_teams_count, "limit": 4},
-    "Round 2: Quarter-Final (Best 5)": {"round": 2, "cutoff": min(5, total_teams_count), "limit": 4},
-    "Round 3: Semi-Final (Best 4)": {"round": 3, "cutoff": min(4, total_teams_count), "limit": 4},
-    "Round 4: Third-Place Playoff (Best 3)": {"round": 4, "cutoff": min(3, total_teams_count), "limit": 4},
-    "💥 Round 5: Sudden-Death Tie-Breaker (2 Draws)": {"round": 5, "cutoff": total_teams_count, "limit": 2}
+    f"Round 1: Preliminary (All {total_teams_count} Teams)": {"round": 1, "cutoff": total_teams_count},
+    "Round 2: Quarter-Final (Best 5)": {"round": 2, "cutoff": min(5, total_teams_count)},
+    "Round 3: Semi-Final (Best 4)": {"round": 3, "cutoff": min(4, total_teams_count)},
+    "Round 4: Third-Place Playoff (Best 3)": {"round": 4, "cutoff": min(3, total_teams_count)},
+    "💥 Round 5: Sudden-Death Tie-Breaker (2 Draws)": {"round": 5, "cutoff": total_teams_count}
 }
 
-selected_stage_label = st.sidebar.selectbox("Active Match Bracket", list(stage_configurations.keys()))
+selected_stage_label = st.sidebar.selectbox("Active Match Bracket", list(stage_configurations.keys()), disabled=st.session_state.stage_active)
 current_round_id = stage_configurations[selected_stage_label]["round"]
 allowed_count = stage_configurations[selected_stage_label]["cutoff"]
-# 🌟 DYNAMIC LIMIT LAYER: Sets maximum allowed questions to 2 for Round 5 tie-breakers
-max_questions_allowed = stage_configurations[selected_stage_label]["limit"]
 
 eligible_teams = ranked_team_list[:allowed_count] if current_round_id != 5 else ALL_TEAMS
-if eligible_teams:
-    st.sidebar.markdown(f"**Eligible/Qualified Teams:** `{', '.join(eligible_teams)}`")
-    chosen_team = st.sidebar.selectbox("Select Active Team", eligible_teams)
-else:
-    st.sidebar.error("No eligible teams found.")
-    chosen_team = None
+chosen_subject = st.sidebar.selectbox("Choose Subject Area", list(BASE_SUBJECTS.keys()), disabled=st.session_state.stage_active)
 
-chosen_subject = st.sidebar.selectbox("Choose Subject Area", list(BASE_SUBJECTS.keys()))
-
-is_already_played = False
-target_label = f"Round {current_round_id} Tie-Breaker" if current_round_id == 5 else f"Round {current_round_id}"
-if chosen_team:
-    for row in st.session_state.completed_rounds:
-        if str(row[0]) == str(chosen_team) and str(row[1]) == str(chosen_subject) and str(row[2]) == target_label:
-            is_already_played = True
-
-if is_already_played:
-    st.sidebar.error(f"🚫 {chosen_team} has already completed {chosen_subject} for this segment!")
-
-if st.sidebar.button("🚀 Open Turn-Based Session", disabled=(st.session_state.round_active or is_already_played or not chosen_team)):
-    start_turn_round(chosen_team, chosen_subject, current_round_id)
+if st.sidebar.button("🚀 Initialize Interleaved Stage Round", disabled=st.session_state.stage_active):
+    initialize_stage_pool(chosen_subject, current_round_id, eligible_teams)
     st.rerun()
 
-# --- GAMEPLAY INTERACTION PANELS ---
-if st.session_state.round_active and st.session_state.round_team:
-    round_header = f"Round {st.session_state.active_round_num} Tie-Breaker" if st.session_state.active_round_num == 5 else f"Round {st.session_state.active_round_num}"
-    st.markdown(f"### 🎯 Team **{st.session_state.round_team}** Turn Session — {st.session_state.round_subject} ({round_header})")
+# --- INTERLEAVED GAMEPLAY MATRIX PANEL ---
+if st.session_state.stage_active:
+    current_team = st.session_state.current_stage_teams[st.session_state.team_rotation_index]
+    total_draw_limit = 2 if st.session_state.stage_round_num == 5 else 4
     
-    # 🌟 Updates target boundary to match either 2 or 4 draws
-    current_limit = 2 if st.session_state.active_round_num == 5 else 4
+    st.markdown(f"### 🎯 Match Matrix Active: **{st.session_state.stage_subject} (Round {st.session_state.stage_round_num})**")
     
-    c1, c2 = st.columns(2)
-    c1.metric(label="Questions Attempted", value=f"{st.session_state.questions_answered_this_round} / {current_limit}")
-    c2.metric(label="Points Earned This Turn", value=f"{st.session_state.round_score} pts")
-    
+    cols_matrix = st.columns(len(st.session_state.current_stage_teams))
+    for index, t_name in enumerate(st.session_state.current_stage_teams):
+        with cols_matrix[index]:
+            is_active_marker = "👉 " if t_name == current_team else ""
+            st.metric(
+                label=f"{is_active_marker}Team {t_name}", 
+                value=f"{st.session_state.team_question_counts[t_name]} / {total_draw_limit} Qs",
+                delta=f"{st.session_state.stage_running_scores[t_name]} Points"
+            )
+
     st.write("---")
+    st.markdown(f"#### 🎭 Current Active Slot: **Team {current_team}** (Question #{st.session_state.team_question_counts[current_team] + 1})")
 
     if not st.session_state.has_drawn_question:
-        st.info(f"💡 Click below to draw a question. You have **{current_limit} total draws** for this phase.")
-        if st.button("🎲 Draw Next Question", type="primary"):
-            draw_random_question()
+        if st.button(f"🎲 Draw Random Question for Team {current_team}", type="primary"):
+            draw_interleaved_question()
             st.rerun()
-            
     else:
         elapsed_time = time.time() - st.session_state.question_start_time
         remaining_seconds = max(0, 30 - int(elapsed_time))
         
         if remaining_seconds <= 0:
             st.toast("⏰ Time ran out for this question!", icon="❌")
-            st.session_state.questions_answered_this_round += 1
-            st.session_state.has_drawn_question = False
-            st.session_state.current_question = None
-            
-            if st.session_state.questions_answered_this_round >= current_limit:
-                terminate_active_round()
-                st.info("Turn closed out automatically.")
+            st.session_state.team_question_counts[current_team] += 1
+            advance_to_next_team()
             st.rerun()
-            
         else:
             st.progress(remaining_seconds / 30)
             if remaining_seconds <= 10:
@@ -358,55 +350,53 @@ if st.session_state.round_active and st.session_state.round_team:
             q = st.session_state.current_question
             if q:
                 st.markdown(f"#### **Question Context:**\n> {q['question']}")
-                options = [f"A: {q.get('optiona','N/A')}", f"B: {q.get('optionb','N/A')}", f"C: {q.get('optionb','N/A')}", f"D: {q.get('optiond','N/A')}", f"E: {q.get('optione','N/A')}"]
-                choice = st.radio("Choose Your Team's Definitive Answer:", options, index=None, key=f"q_{st.session_state.questions_answered_this_round}")
+                options = [f"A: {q.get('optiona','N/A')}", f"B: {q.get('optionb','N/A')}", f"C: {q.get('optionc','N/A')}", f"D: {q.get('optiond','N/A')}", f"E: {q.get('optione','N/A')}"]
+                choice = st.radio("Choose Your Team's Definitive Answer:", options, index=None, key=f"interleaved_{current_team}_{st.session_state.team_question_counts[current_team]}")
                 
                 col1, col2 = st.columns([1, 4])
                 with col1:
                     if st.button("Submit Answer", type="primary"):
                         if choice:
                             if choice[0].upper() == str(q['answer']).strip().upper():
-                                st.session_state.round_score += 1
+                                st.session_state.stage_running_scores[current_team] += 1
                                 st.toast("Correct! 🎉", icon="✅")
                             else:
                                 st.toast(f"Wrong! Correct was {q['answer']}", icon="❌")
                             
-                            st.session_state.questions_answered_this_round += 1
-                            st.session_state.has_drawn_question = False
-                            st.session_state.current_question = None
-                            
-                            if st.session_state.questions_answered_this_round >= current_limit:
-                                terminate_active_round()
-                                st.success("🎉 Target draws reached!")
-                                time.sleep(1.5)
+                            st.session_state.team_question_counts[current_team] += 1
+                            advance_to_next_team()
                             st.rerun()
                         else:
                             st.warning("Please select an option before committing!")
                 with col2:
                     if st.button("⏭️ Skip / Burn Question"):
-                        st.session_state.questions_answered_this_round += 1
-                        st.session_state.has_drawn_question = False
-                        st.session_state.current_question = None
-                        
-                        if st.session_state.questions_answered_this_round >= current_limit:
-                            terminate_active_round()
-                            st.info("Turn closed out following a skipped submission limit.")
-                            time.sleep(1.5)
+                        st.session_state.team_question_counts[current_team] += 1
+                        advance_to_next_team()
                         st.rerun()
             else:
-                st.warning("Category question pool completely depleted.")
-                if st.button("Force Complete Turn Session"):
-                    terminate_active_round()
-                    st.rerun()
-                    
-            time.sleep(0.1)
-            st.rerun()
+                st.warning("Question pool completely depleted. Skipping turn forward.")
+                st.session_state.team_question_counts[current_team] += 1
+                advance_to_next_team()
+                st.rerun()
+                
+    if st.sidebar.button("🚨 Force Terminate Current Stage"):
+        st.session_state.stage_active = False
+        st.rerun()
+        
+    time.sleep(0.1)
+    st.rerun()
 
 # --- STANDINGS SCREEN DISPLAY ---
 st.write("---")
-st.subheader("📊 Live Leaderboard")
+st.subheader("📊 Live Leaderboard Standings")
 scores_df = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
 scores_df = scores_df[scores_df["Team"].isin(ALL_TEAMS)].sort_values(by="Total Score", ascending=False).reset_index(drop=True)
+
+if not scores_df.empty and len(scores_df) > 1:
+    lowest_score = scores_df.iloc[-1]["Total Score"]
+    elimination_candidates = scores_df[scores_df["Total Score"] == lowest_score]["Team"].tolist()
+    st.error(f"⚠️ **Bottom Tier Elimination Risk:** Team(s) `{', '.join(elimination_candidates)}` are at the bottom of the standings board ({lowest_score} pts).")
+
 st.dataframe(scores_df.set_index("Team"), use_container_width=True)
 
 if st.sidebar.button("🔄 Sync with Faculty QUIZ Data"):
