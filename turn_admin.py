@@ -22,6 +22,7 @@ SCORES_FILE = "scores.csv"
 ROUNDS_FILE = "completed_rounds.csv"
 TEAMS_FILE = "team.csv"
 USERS_FILE = "users.csv"  
+TAKEN_QUESTIONS_FILE = "taken_questions.csv" 
 LOGO_FILE = "uniben.png"
 BRANCH = "main"
 
@@ -57,7 +58,7 @@ def load_allowed_teams():
 
 ALL_TEAMS = load_allowed_teams()
 
-# Header Row Layout with UNIBEN logo icon image 
+# Header Row Layout
 col_adm_logo, col_adm_title = st.columns([1, 14])
 with col_adm_logo:
     if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=70)
@@ -73,13 +74,15 @@ def load_dashboard_data_from_github():
     
     if res_scores.status_code == 200:
         content = base64.b64decode(res_scores.json()["content"]).decode("utf-8")
-        df_scores = pd.read_csv(StringIO(content))
-        df_scores.columns = [str(c).strip().lower() for c in df_scores.columns]
-        team_header = "team" if "team" in df_scores.columns else df_scores.columns[0]
-        score_header = "total score" if "total score" in df_scores.columns else df_scores.columns[1]
-        
-        df_scores = df_scores.rename(columns={team_header: "Team", score_header: "Total Score"})
-        df_scores["Team"] = df_scores["Team"].astype(str)
+        try:
+            df_scores = pd.read_csv(StringIO(content))
+            df_scores.columns = [str(c).strip().lower() for c in df_scores.columns]
+            team_header = "team" if "team" in df_scores.columns else df_scores.columns[0]
+            score_header = "total score" if "total score" in df_scores.columns else df_scores.columns[1]
+            df_scores = df_scores.rename(columns={team_header: "Team", score_header: "Total Score"})
+            df_scores["Team"] = df_scores["Team"].astype(str)
+        except pd.errors.EmptyDataError:
+            df_scores = pd.DataFrame(list({t: 0 for t in ALL_TEAMS}.items()), columns=["Team", "Total Score"])
     else:
         df_scores = pd.DataFrame(list({t: 0 for t in ALL_TEAMS}.items()), columns=["Team", "Total Score"])
     
@@ -96,7 +99,10 @@ def load_dashboard_data_from_github():
     
     if res_rounds.status_code == 200:
         content = base64.b64decode(res_rounds.json()["content"]).decode("utf-8")
-        df_rounds = pd.read_csv(StringIO(content))
+        try:
+            df_rounds = pd.read_csv(StringIO(content))
+        except pd.errors.EmptyDataError:
+            df_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
     else:
         df_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
         
@@ -131,7 +137,7 @@ def render_live_monitoring_view():
                 
     st.write("---")
     
-    col1, col2 = st.columns([1, 1.3], gap="large")
+    col1, col2 = st.columns([1, 1.4], gap="large")
     
     with col1:
         st.subheader("🏆 Live Leaderboard Standings")
@@ -145,37 +151,55 @@ def render_live_monitoring_view():
         )
         
     with col2:
-        st.subheader("📊 Round Matrix (4 Questions Picked in Turns)")
+        st.subheader("📊 Category Performance Matrix")
         df_rounds.columns = [str(c).strip().lower() for c in df_rounds.columns]
         
+        team_col = None
+        subject_col = None
+        stage_col = None
+        score_col = None
+        
+        if not df_rounds.empty:
+            for n in ["team", "dept"]: 
+                if n in df_rounds.columns: team_col = n; break
+            for n in ["subject", "category", "area"]: 
+                if n in df_rounds.columns: subject_col = n; break
+            for n in ["bracket stage", "stage", "round", "bracket"]: 
+                if n in df_rounds.columns: stage_col = n; break
+            for n in ["points scored", "points", "score"]: 
+                if n in df_rounds.columns: score_col = n; break
+
         matrix_data = []
         for team in ALL_TEAMS:
-            team_col = "team" if "team" in df_rounds.columns else df_rounds.columns[0] if not df_rounds.empty else None
             team_logs = df_rounds[df_rounds[team_col].astype(str).str.lower() == str(team).lower()] if team_col else pd.DataFrame()
             
-            def extract_round_score(round_str):
-                if team_logs.empty: return "⏳ Not Picked"
-                stage_col, score_col = None, None
-                for n in ["bracket stage", "stage", "round", "bracket"]:
-                    if n in df_rounds.columns: stage_col = n; break
-                for n in ["points scored", "points", "score"]:
-                    if n in df_rounds.columns: score_col = n; break
-
-                if stage_col and score_col:
-                    match_row = team_logs[team_logs[stage_col].astype(str).str.lower() == round_str.lower()]
-                    if not match_row.empty: return f"✅ Done ({match_row.iloc[0][score_col]}/4 pts)"
-                return "⏳ Not Picked"
+            def extract_cell(round_str, category_keyword):
+                if team_logs.empty or not subject_col or not stage_col or not score_col: 
+                    return "⏳ Pending"
+                
+                match_rows = team_logs[
+                    (team_logs[stage_col].astype(str).str.lower() == round_str.lower()) & 
+                    (team_logs[subject_col].astype(str).str.lower().str.contains(category_keyword.lower()))
+                ]
+                
+                if not match_rows.empty:
+                    return f"✅ Done ({match_rows.iloc[0][score_col]}/4 pts)"
+                return "⏳ Pending"
 
             total_pts = df_scores[df_scores["Team"] == team]["Total Score"].values[0] if not df_scores[df_scores["Team"] == team].empty else 0
             
             matrix_data.append({
                 "Team": team, 
-                "Round 1": extract_round_score("Round 1"), 
-                "Round 2": extract_round_score("Round 2"),
-                "Round 3": extract_round_score("Round 3"), 
-                "Round 4": extract_round_score("Round 4"),
-                "Round 5": extract_round_score("Round 5"), 
-                "Aggregate Score": f"{total_pts} pts"
+                "R1: Affairs": extract_cell("Round 1", "Affairs"), 
+                "R1: Computing": extract_cell("Round 1", "Computing"),
+                "R2: Affairs": extract_cell("Round 2", "Affairs"), 
+                "R2: Computing": extract_cell("Round 2", "Computing"),
+                "R3: Affairs": extract_cell("Round 3", "Affairs"), 
+                "R3: Computing": extract_cell("Round 3", "Computing"),
+                "R4: Affairs": extract_cell("Round 4", "Affairs"), 
+                "R4: Computing": extract_cell("Round 4", "Computing"),
+                "R5: Finals": extract_cell("Round 5", ""), 
+                "Aggregate": f"{total_pts} pts"
             })
             
         df_matrix = pd.DataFrame(matrix_data)
@@ -183,7 +207,7 @@ def render_live_monitoring_view():
         df_matrix = df_matrix.sort_values("_sort_idx").drop(columns=["_sort_idx"]).reset_index(drop=True)
         st.dataframe(df_matrix.set_index("Team"), use_container_width=True)
 
-# Run autonomous UI loop block
+# Start auto monitoring cycle
 render_live_monitoring_view()
 
 # -----------------------------------------------------------------
@@ -225,6 +249,9 @@ else:
         fresh_scores = pd.DataFrame(list({t: 0 for t in ALL_TEAMS}.items()), columns=["Team", "Total Score"])
         fresh_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
         
+        # Structure with structural column instead of a blank file to avoid panda errors
+        fresh_taken = pd.DataFrame({"question": ["_initialization_placeholder_"]}) 
+        
         def api_wipe(path, df):
             url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{path}"
             csv_str = df.to_csv(index=False)
@@ -237,12 +264,13 @@ else:
 
         api_wipe(SCORES_FILE, fresh_scores)
         api_wipe(ROUNDS_FILE, fresh_rounds)
+        api_wipe(TAKEN_QUESTIONS_FILE, fresh_taken) 
         st.session_state.confirm_reset = False
-        st.toast("GitHub files successfully wiped clean! 🧹", icon="✅")
+        st.toast("GitHub files and question exclusions wiped clean! 🧹", icon="✅")
         time.sleep(0.5)
         st.rerun()
     if col_no.button("Cancel", use_container_width=True):
         st.session_state.confirm_reset = False; st.rerun()
 
 st.markdown("""<style>.admin-footer { position: fixed; left: 0; bottom: 0; width: 100%; background-color: #0e1117; color: #737a85; text-align: center; padding: 12px 0; font-size: 14px; font-weight: 500; border-top: 1px solid #262730; z-index: 999; } .main .block-container { padding-bottom: 80px !important; } @media (min-width: 576px) { .admin-footer { padding-left: 15rem; } }</style>""", unsafe_allow_html=True)
-st.markdown(f'<div class="admin-footer">⚙️ Faculty of Computing Quiz Administrative Dashboard • {datetime.now().year} • 📡 Automated Sync Active</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="admin-footer">⚙️ Faculty of Computing Quiz Administrative Dashboard • 2026 • 📡 Automated Sync Active</div>', unsafe_allow_html=True)
