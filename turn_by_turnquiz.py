@@ -40,6 +40,9 @@ BASE_SUBJECTS = {
     "General Computing & ICT": "ICT"
 }
 
+# HARDCODED DEPARTMENT LIST FALLBACK
+DEFAULT_DEPARTMENTS = ["Computer_Science", "Data_Science", "Cyber_Security", "ICT", "Info_Techn", "Software"]
+
 # -------------------------------
 # GITHUB API REMOTE STORAGE ENGINES
 # -------------------------------
@@ -69,13 +72,16 @@ def load_allowed_teams():
         if res.status_code == 200:
             content = base64.b64decode(res.json()["content"]).decode("utf-8")
             df = pd.read_csv(StringIO(content))
-            team_col = [col for col in df.columns if 'team' in col.lower()]
+            team_col = [col for col in df.columns if 'team' in col.lower() or 'team' in str(df.columns[0]).lower()]
             if team_col:
-                return [str(name).strip() for name in df[team_col[0]].dropna().unique()]
-            return [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
+                teams = [str(name).strip() for name in df[team_col[0]].dropna().unique()]
+            else:
+                teams = [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
+            if teams:
+                return teams
     except Exception:
         pass
-    return ["A", "B", "C", "D", "E", "F"]
+    return DEFAULT_DEPARTMENTS
 
 ALL_TEAMS = load_allowed_teams()
 
@@ -251,7 +257,6 @@ def draw_interleaved_question():
             globally_taken.append(q['question'])
             df_taken = pd.DataFrame(globally_taken, columns=["question"])
             
-            # Bound verification directly inside writer loop
             idx = st.session_state.team_rotation_index % len(st.session_state.current_stage_teams)
             current_active_team = st.session_state.current_stage_teams[idx]
             push_file_to_github(TAKEN_QUESTIONS_FILE, df_taken, f"Marked used by: {current_active_team}")
@@ -318,7 +323,6 @@ if st.sidebar.button("🚀 Initialize Interleaved Stage Round", disabled=st.sess
 
 # --- INTERLEAVED GAMEPLAY MATRIX PANEL ---
 if st.session_state.stage_active:
-    # PREVENTATIVE INDEXING CHECK GUARD
     if not st.session_state.current_stage_teams:
         st.session_state.stage_active = False
         st.rerun()
@@ -336,16 +340,16 @@ if st.session_state.stage_active:
         with cols_matrix[index]:
             is_active_marker = "👉 " if t_name == current_team else ""
             st.metric(
-                label=f"{is_active_marker}Team {t_name}", 
+                label=f"{is_active_marker}{t_name}", 
                 value=f"{st.session_state.team_question_counts.get(t_name, 0)} / {total_draw_limit} Qs",
                 delta=f"{st.session_state.stage_running_scores.get(t_name, 0)} Points"
             )
 
     st.write("---")
-    st.markdown(f"#### 🎭 Current Active Slot: **Team {current_team}** (Question #{st.session_state.team_question_counts.get(current_team, 0) + 1})")
+    st.markdown(f"#### 🎭 Current Active Slot: **{current_team}** (Question #{st.session_state.team_question_counts.get(current_team, 0) + 1})")
 
     if not st.session_state.has_drawn_question:
-        if st.button(f"🎲 Draw Random Question for Team {current_team}", type="primary"):
+        if st.button(f"🎲 Draw Random Question for {current_team}", type="primary"):
             draw_interleaved_question()
             st.rerun()
     else:
@@ -368,7 +372,7 @@ if st.session_state.stage_active:
             if q:
                 st.markdown(f"#### **Question Context:**\n> {q['question']}")
                 options = [f"A: {q.get('optiona','N/A')}", f"B: {q.get('optionb','N/A')}", f"C: {q.get('optionc','N/A')}", f"D: {q.get('optiond','N/A')}", f"E: {q.get('optione','N/A')}"]
-                choice = st.radio("Choose Your Team's Definitive Answer:", options, index=None, key=f"interleaved_{current_team}_{st.session_state.team_question_counts.get(current_team, 0)}")
+                choice = st.radio("Choose Your Department's Definitive Answer:", options, index=None, key=f"interleaved_{current_team}_{st.session_state.team_question_counts.get(current_team, 0)}")
                 
                 col1, col2 = st.columns([1, 4])
                 with col1:
@@ -412,7 +416,7 @@ scores_df = scores_df[scores_df["Team"].isin(ALL_TEAMS)].sort_values(by="Total S
 if not scores_df.empty and len(scores_df) > 1:
     lowest_score = scores_df.iloc[-1]["Total Score"]
     elimination_candidates = scores_df[scores_df["Total Score"] == lowest_score]["Team"].tolist()
-    st.error(f"⚠️ **Bottom Tier Elimination Risk:** Team(s) `{', '.join(elimination_candidates)}` are at the bottom of the standings board ({lowest_score} pts).")
+    st.error(f"⚠️ **Bottom Tier Elimination Risk:** `{', '.join(elimination_candidates)}` are at the bottom of the standings board ({lowest_score} pts).")
 
 st.dataframe(scores_df.set_index("Team"), use_container_width=True)
 
