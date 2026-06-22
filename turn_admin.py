@@ -45,29 +45,16 @@ def load_allowed_teams():
             return [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
     except Exception:
         pass
-        
-    if os.path.exists(TEAMS_FILE):
-        try:
-            df = pd.read_csv(TEAMS_FILE)
-            team_col = [col for col in df.columns if 'team' in col.lower()]
-            return [str(name).strip() for name in df[team_col[0]].dropna().unique()] if team_col else [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
-        except Exception:
-            return ["A", "B", "C", "D", "E", "F"]
-            
     return ["A", "B", "C", "D", "E", "F"]
 
 ALL_TEAMS = load_allowed_teams()
 
-# Header Row Layout
 col_adm_logo, col_adm_title = st.columns([1, 14])
 with col_adm_logo:
     if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=70)
 with col_adm_title:
     st.markdown("<h1 style='margin-top: -5px;'>Faculty of Computing Quiz Competition — Admin Dashboard</h1>", unsafe_allow_html=True)
 
-# -----------------------------------------------------------------
-# DATA SYNC PIPELINE (GITHUB REST API LAYER)
-# -----------------------------------------------------------------
 def load_dashboard_data_from_github():
     url_scores = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{SCORES_FILE}"
     res_scores = requests.get(url_scores, headers=HEADERS, params={"ref": BRANCH})
@@ -108,9 +95,6 @@ def load_dashboard_data_from_github():
         
     return df_scores, df_rounds
 
-# -----------------------------------------------------------------
-# AUTONOMOUS LIVE MONITORING PROJECTOR SCREEN
-# -----------------------------------------------------------------
 @st.fragment(run_every=4.0) 
 def render_live_monitoring_view():
     df_scores, df_rounds = load_dashboard_data_from_github()
@@ -122,18 +106,18 @@ def render_live_monitoring_view():
         {"title": "Round 2 (Top 5)", "cutoff": 5},
         {"title": "Round 3 (Top 4)", "cutoff": 4},
         {"title": "Round 4 (Top 3)", "cutoff": 3},
-        {"title": "Round 5 (Finals - Top 2)", "cutoff": 2}
+        {"title": "💥 Tie-Breakers (2 Draws)", "cutoff": len(ALL_TEAMS)}
     ]
     
     cols = st.columns(5)
     for i, stage in enumerate(stages_meta):
         with cols[i]:
             cutoff = stage["cutoff"]
-            if len(ranked_teams) >= cutoff:
+            if len(ranked_teams) >= cutoff and i != 4:
                 borderline_team = ranked_teams[cutoff - 1]
                 st.metric(label=stage["title"], value="Active Bracket", delta=f"Cutoff: Team {borderline_team}")
             else:
-                st.metric(label=stage["title"], value="Calculating...")
+                st.metric(label=stage["title"], value="Active Mode" if i==4 else "Calculating...")
                 
     st.write("---")
     
@@ -151,23 +135,13 @@ def render_live_monitoring_view():
         )
         
     with col2:
-        st.subheader("📊 Category Performance Matrix")
+        st.subheader("📊 Performance Matrix (Including Tie-Breakers)")
         df_rounds.columns = [str(c).strip().lower() for c in df_rounds.columns]
         
-        team_col = None
-        subject_col = None
-        stage_col = None
-        score_col = None
-        
-        if not df_rounds.empty:
-            for n in ["team", "dept"]: 
-                if n in df_rounds.columns: team_col = n; break
-            for n in ["subject", "category", "area"]: 
-                if n in df_rounds.columns: subject_col = n; break
-            for n in ["bracket stage", "stage", "round", "bracket"]: 
-                if n in df_rounds.columns: stage_col = n; break
-            for n in ["points scored", "points", "score"]: 
-                if n in df_rounds.columns: score_col = n; break
+        team_col = "team" if "team" in df_rounds.columns else (df_rounds.columns[0] if not df_rounds.empty else None)
+        subject_col = "subject" if "subject" in df_rounds.columns else (df_rounds.columns[1] if not df_rounds.empty else None)
+        stage_col = "bracket stage" if "bracket stage" in df_rounds.columns else (df_rounds.columns[2] if not df_rounds.empty else None)
+        score_col = "points scored" if "points scored" in df_rounds.columns else (df_rounds.columns[3] if not df_rounds.empty else None)
 
         matrix_data = []
         for team in ALL_TEAMS:
@@ -183,7 +157,8 @@ def render_live_monitoring_view():
                 ]
                 
                 if not match_rows.empty:
-                    return f"✅ Done ({match_rows.iloc[0][score_col]}/4 pts)"
+                    max_score = 2 if "tie-breaker" in round_str.lower() else 4
+                    return f"✅ Done ({match_rows.iloc[0][score_col]}/{max_score} pts)"
                 return "⏳ Pending"
 
             total_pts = df_scores[df_scores["Team"] == team]["Total Score"].values[0] if not df_scores[df_scores["Team"] == team].empty else 0
@@ -198,7 +173,7 @@ def render_live_monitoring_view():
                 "R3: Computing": extract_cell("Round 3", "Computing"),
                 "R4: Affairs": extract_cell("Round 4", "Affairs"), 
                 "R4: Computing": extract_cell("Round 4", "Computing"),
-                "R5: Finals": extract_cell("Round 5", ""), 
+                "⚠️ Sudden Death": extract_cell("Round 5 Tie-Breaker", ""), 
                 "Aggregate": f"{total_pts} pts"
             })
             
@@ -207,31 +182,26 @@ def render_live_monitoring_view():
         df_matrix = df_matrix.sort_values("_sort_idx").drop(columns=["_sort_idx"]).reset_index(drop=True)
         st.dataframe(df_matrix.set_index("Team"), use_container_width=True)
 
-# Start auto monitoring cycle
 render_live_monitoring_view()
 
-# -----------------------------------------------------------------
-# ADMIN CONTROL PANEL SIDEBAR PANEL
-# -----------------------------------------------------------------
+# --- ADMIN PANEL CONTROL BUTTONS ---
 st.sidebar.header("⚠️ Admin Control Panel")
-
 if st.sidebar.button("🔓 Clear Active Session Locks", use_container_width=True):
-    with st.spinner("Flushing hardware authentication states..."):
+    with st.spinner("Flushing authentication states..."):
         url_users = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{USERS_FILE}"
         res = requests.get(url_users, headers=HEADERS, params={"ref": BRANCH})
         if res.status_code == 200:
             content = base64.b64decode(res.json()["content"]).decode("utf-8")
             df_u = pd.read_csv(StringIO(content))
             df_u.columns = [str(col).strip().lower() for col in df_u.columns]
-            
             if "is_logged_in" in df_u.columns:
                 df_u["is_logged_in"] = 0  
                 csv_str = df_u.to_csv(index=False)
                 encoded = base64.b64encode(csv_str.encode("utf-8")).decode("utf-8")
                 sha = res.json().get("sha")
-                p_load = {"message": "🔓 Administrative Lock Override Reset", "content": encoded, "branch": BRANCH, "sha": sha}
+                p_load = {"message": "🔓 Lock Reset", "content": encoded, "branch": BRANCH, "sha": sha}
                 requests.put(url_users, headers=HEADERS, data=json.dumps(p_load))
-                st.sidebar.success("All login locking systems released! 🔓")
+                st.sidebar.success("Locks released!")
                 time.sleep(0.5)
                 st.rerun()
 
@@ -248,8 +218,6 @@ else:
     if col_yes.button("Yes, Wipe", type="primary", use_container_width=True):
         fresh_scores = pd.DataFrame(list({t: 0 for t in ALL_TEAMS}.items()), columns=["Team", "Total Score"])
         fresh_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
-        
-        # Structure with structural column instead of a blank file to avoid panda errors
         fresh_taken = pd.DataFrame({"question": ["_initialization_placeholder_"]}) 
         
         def api_wipe(path, df):
@@ -258,7 +226,7 @@ else:
             encoded = base64.b64encode(csv_str.encode("utf-8")).decode("utf-8")
             res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
             sha = res.json().get("sha") if res.status_code == 200 else None
-            p_load = {"message": "💥 Administrative Database Reset Wipe", "content": encoded, "branch": BRANCH}
+            p_load = {"message": "💥 Admin Reset Wipe", "content": encoded, "branch": BRANCH}
             if sha: p_load["sha"] = sha
             requests.put(url, headers=HEADERS, data=json.dumps(p_load))
 
@@ -266,7 +234,7 @@ else:
         api_wipe(ROUNDS_FILE, fresh_rounds)
         api_wipe(TAKEN_QUESTIONS_FILE, fresh_taken) 
         st.session_state.confirm_reset = False
-        st.toast("GitHub files and question exclusions wiped clean! 🧹", icon="✅")
+        st.toast("GitHub records wiped clean! 🧹", icon="✅")
         time.sleep(0.5)
         st.rerun()
     if col_no.button("Cancel", use_container_width=True):
