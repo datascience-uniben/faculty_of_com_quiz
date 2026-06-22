@@ -25,7 +25,7 @@ REPO_NAME = "faculty_of_com_quiz"
 SCORES_FILE = "scores.csv"
 ROUNDS_FILE = "completed_rounds.csv"
 TEAMS_FILE = "team.csv"
-TAKEN_QUESTIONS_FILE = "taken_questions.csv" # 🌟 New persistence file
+TAKEN_QUESTIONS_FILE = "taken_questions.csv" 
 LOGO_FILE = "uniben.png"  
 BRANCH = "main"
 
@@ -97,8 +97,11 @@ def sync_scores_from_github():
     res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
     if res.status_code == 200:
         content = base64.b64decode(res.json()["content"]).decode("utf-8")
-        df = pd.read_csv(StringIO(content))
-        return dict(zip(df["Team"].astype(str), df["Total Score"]))
+        try:
+            df = pd.read_csv(StringIO(content))
+            return dict(zip(df["Team"].astype(str), df["Total Score"]))
+        except (pd.errors.EmptyDataError, KeyError):
+            return {team: 0 for team in ALL_TEAMS}
     return {team: 0 for team in ALL_TEAMS}
 
 def sync_rounds_from_github():
@@ -106,17 +109,25 @@ def sync_rounds_from_github():
     res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
     if res.status_code == 200:
         content = base64.b64decode(res.json()["content"]).decode("utf-8")
-        return pd.read_csv(StringIO(content)).values.tolist()
+        try:
+            return pd.read_csv(StringIO(content)).values.tolist()
+        except pd.errors.EmptyDataError:
+            return []
     return []
 
 def sync_taken_questions_from_github():
-    """Fetches the global list of questions already answered across all teams."""
+    """Fetches global list of taken questions while avoiding EmptyDataError crashes."""
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{TAKEN_QUESTIONS_FILE}"
     res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
     if res.status_code == 200:
         content = base64.b64decode(res.json()["content"]).decode("utf-8")
-        df = pd.read_csv(StringIO(content))
-        return df["question"].dropna().astype(str).tolist()
+        try:
+            df = pd.read_csv(StringIO(content))
+            if "question" in df.columns:
+                return df["question"].dropna().astype(str).tolist()
+            return []
+        except (pd.errors.EmptyDataError, ValueError):
+            return []
     return []
 
 # -------------------------------
@@ -155,8 +166,6 @@ if "question_start_time" not in st.session_state:
 def set_question_pool(subject_key, round_number):
     target_csv = f"{BASE_SUBJECTS[subject_key]}{round_number}.csv"
     raw_questions = load_questions(target_csv)
-    
-    # Sync globally blocked questions from repository
     globally_taken_questions = sync_taken_questions_from_github()
     cleaned_pool = []
     
@@ -177,8 +186,8 @@ def set_question_pool(subject_key, round_number):
     for q in raw_questions:
         q_text = str(get_csv_value(q, ['question', 'q', 'text'])).strip()
         
-        # 🌟 EXCLUSION FILTER: If question is already in taken_questions.csv, bypass it completely
-        if q_text in globally_taken_questions:
+        # Cross-team exclusive verification layer
+        if q_text in globally_taken_questions or q_text == "_initialization_placeholder_":
             continue
 
         standardized_q = {
@@ -196,14 +205,13 @@ def set_question_pool(subject_key, round_number):
     st.session_state.question_pool = cleaned_pool
 
 def draw_random_question():
-    """Picks one random question, removes it, and logs it persistently to GitHub repository."""
+    """Draws a unique question and safely posts it to the global repository registry."""
     if st.session_state.question_pool:
         q = st.session_state.question_pool.pop()
         st.session_state.current_question = q
         st.session_state.has_drawn_question = True
         st.session_state.question_start_time = time.time()
         
-        # 🌟 PERSISTENCE ENGINE: Append this question immediately to taken_questions.csv
         globally_taken = sync_taken_questions_from_github()
         if q['question'] not in globally_taken:
             globally_taken.append(q['question'])
@@ -260,10 +268,8 @@ def terminate_active_round():
 # -------------------------------
 col_logo, col_title = st.columns([1, 14])
 with col_logo:
-    if os.path.exists(LOGO_FILE):
-        st.image(LOGO_FILE, width=70)
-    else:
-        st.write("🏆")
+    if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=70)
+    else: st.write("🏆")
 with col_title:
     st.markdown("<h1 style='margin-top: -5px;'>Faculty of Computing Quiz Competition</h1>", unsafe_allow_html=True)
 
@@ -318,7 +324,7 @@ if st.session_state.round_active and st.session_state.round_team:
     st.write("---")
 
     if not st.session_state.has_drawn_question:
-        st.info("💡 Ready for your turn? Click the button below to draw an unpicked random question from the pool.")
+        st.info("💡 Ready for your turn? Click the button below to draw an unpicked random question from the pool. **(30s timer)**")
         if st.button("🎲 Draw Next Question", type="primary"):
             draw_random_question()
             st.rerun()
@@ -392,7 +398,7 @@ if st.session_state.round_active and st.session_state.round_team:
             time.sleep(0.1)
             st.rerun()
 
-# --- STANDINGS SCREEN DISPLAY ---
+# --- STANDINGS Display ---
 st.write("---")
 st.subheader("📊 Live Leaderboard")
 scores_df = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
