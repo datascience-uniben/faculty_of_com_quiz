@@ -120,7 +120,7 @@ def render_live_monitoring_view():
         {"title": "Round 2 (Top 5)", "cutoff": 5},
         {"title": "Round 3 (Top 4)", "cutoff": 4},
         {"title": "Round 4 (Top 3)", "cutoff": 3},
-        {"title": "💥 Round 5 (Sudden Death)", "cutoff": len(ALL_TEAMS)}
+        {"title": "💥 Round 5 (Grand Fanal)", "cutoff": len(ALL_TEAMS)}
     ]
     
     cols = st.columns(5)
@@ -131,7 +131,7 @@ def render_live_monitoring_view():
                 borderline_team = ranked_teams[cutoff - 1]
                 st.metric(label=stage["title"], value="Active Bracket", delta=f"Cutoff: Team {borderline_team}")
             else:
-                st.metric(label=stage["title"], value="Sudden-Death Ready" if i==4 else "Calculating...")
+                st.metric(label=stage["title"], value="Grand-Final Ready" if i==4 else "Calculating...")
                 
     st.write("---")
     
@@ -200,7 +200,7 @@ def render_live_monitoring_view():
                 "R3: Computing": extract_cell("Round 3", "Computing"),
                 "R4: Affairs": extract_cell("Round 4", "Affairs"), 
                 "R4: Computing": extract_cell("Round 4", "Computing"),
-                "⚠️ Sudden Death": extract_cell("Round 5 Tie-Breaker", ""), 
+                "⚠️ Grand Final": extract_cell("Round 5 Tie-Breaker", ""), 
                 "Aggregate": f"{total_pts} pts"
             })
             
