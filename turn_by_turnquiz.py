@@ -100,7 +100,6 @@ def sync_scores_from_github():
         content = base64.b64decode(res.json()["content"]).decode("utf-8")
         try:
             df = pd.read_csv(StringIO(content))
-            # Fallback data if file structure parsed incorrectly
             if df.empty or "Team" not in df.columns:
                 return {team: 0 for team in ALL_TEAMS}
             return dict(zip(df["Team"].astype(str), df["Total Score"]))
@@ -167,11 +166,9 @@ if "question_pool" not in st.session_state:
 # ROUND ROBIN OPERATIONS ENGINE
 # -------------------------------
 def advance_to_next_team():
-    """Cycles seamlessly to the next eligible team requiring questions."""
     teams = st.session_state.current_stage_teams
     start_idx = st.session_state.team_rotation_index
     
-    # Dynamic round limit configuration parameters
     round_limits = {1: 4, 2: 5, 3: 6, 4: 7, 5: 8}
     total_needed = round_limits.get(st.session_state.stage_round_num, 4)
     
@@ -296,7 +293,6 @@ with col_logo:
 with col_title:
     st.markdown("<h1 style='margin-top: -5px;'>Faculty of Computing Quiz Competition</h1>", unsafe_allow_html=True)
 
-# Ensure session score structures can safely map even if database structure was blank
 for team in ALL_TEAMS:
     if team not in st.session_state.scores:
         st.session_state.scores[team] = 0
@@ -311,7 +307,7 @@ stage_configurations = {
     "Round 2: Quarter-Final (Best 5)": {"round": 2, "cutoff": min(5, total_teams_count)},
     "Round 3: Semi-Final (Best 4)": {"round": 3, "cutoff": min(4, total_teams_count)},
     "Round 4: Third-Place Playoff (Best 3)": {"round": 4, "cutoff": min(3, total_teams_count)},
-    "💥 Round 5: Sudden-Death Tie-Breaker (2 Draws)": {"round": 5, "cutoff": total_teams_count}
+    "💥 Round 5: Sudden-Death Tie-Breaker": {"round": 5, "cutoff": total_teams_count}
 }
 
 selected_stage_label = st.sidebar.selectbox("Active Match Bracket", list(stage_configurations.keys()), disabled=st.session_state.stage_active)
@@ -327,19 +323,16 @@ if st.sidebar.button("🚀 Initialize Interleaved Stage Round", disabled=st.sess
 
 # --- INTERLEAVED GAMEPLAY MATRIX PANEL ---
 if st.session_state.stage_active:
-    # Defend against Empty / Failed State initializations
     if not st.session_state.current_stage_teams:
         st.error("⚠️ No eligible teams evaluated for this bracket stage. Force resetting.")
         st.session_state.stage_active = False
         st.rerun()
         
-    # Prevent Index out of Bounds IndexError
     if st.session_state.team_rotation_index >= len(st.session_state.current_stage_teams):
         st.session_state.team_rotation_index = 0
 
     current_team = st.session_state.current_stage_teams[st.session_state.team_rotation_index]
     
-    # Updated dynamic metrics per round request structure mapping
     round_limits = {1: 4, 2: 5, 3: 6, 4: 7, 5: 8}
     total_draw_limit = round_limits.get(st.session_state.stage_round_num, 4)
     
@@ -412,7 +405,6 @@ if st.session_state.stage_active:
                 advance_to_next_team()
                 st.rerun()
             
-            # Formatted timer loop execution safely isolated within countdown bounds
             time.sleep(0.1)
             st.rerun()
                 
@@ -420,11 +412,14 @@ if st.session_state.stage_active:
         st.session_state.stage_active = False
         st.rerun()
 
-# --- STANDINGS SCREEN DISPLAY ---
+# --- STANDINGS SCREEN DISPLAY (DYNAMICAL ACCORDING TO TEAM PRESENCE) ---
 st.write("---")
 st.subheader("📊 Live Leaderboard Standings")
 scores_df = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
-scores_df = scores_df[scores_df["Team"].isin(ALL_TEAMS)].sort_values(by="Total Score", ascending=False).reset_index(drop=True)
+
+# Filter dynamically: show only teams configured/running in the specific round bracket
+visible_teams = st.session_state.current_stage_teams if st.session_state.stage_active else eligible_teams
+scores_df = scores_df[scores_df["Team"].isin(visible_teams)].sort_values(by="Total Score", ascending=False).reset_index(drop=True)
 
 if not scores_df.empty and len(scores_df) > 1:
     lowest_score = scores_df.iloc[-1]["Total Score"]
