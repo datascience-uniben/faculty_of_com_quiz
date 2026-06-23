@@ -307,7 +307,7 @@ stage_configurations = {
     "Round 2: Quarter-Final (Best 5)": {"round": 2, "cutoff": min(5, total_teams_count)},
     "Round 3: Semi-Final (Best 4)": {"round": 3, "cutoff": min(4, total_teams_count)},
     "Round 4: Third-Place Playoff (Best 3)": {"round": 4, "cutoff": min(3, total_teams_count)},
-    "💥 Round 5: Sudden-Death Tie-Breaker": {"round": 5, "cutoff": total_teams_count}
+    "💥 Round 5: Grand Final": {"round": 5, "cutoff": total_teams_count}
 }
 
 selected_stage_label = st.sidebar.selectbox("Active Match Bracket", list(stage_configurations.keys()), disabled=st.session_state.stage_active)
