@@ -103,7 +103,7 @@ stage_configurations = {
     "Round 2: Quarter-Final": {"round": 2, "cutoff": min(5, total_teams_count)},
     "Round 3: Semi-Final": {"round": 3, "cutoff": min(4, total_teams_count)},
     "Round 4: Third-Place Playoff": {"round": 4, "cutoff": min(3, total_teams_count)},
-    "💥 Round 5: Sudden Death": {"round": 5, "cutoff": total_teams_count}
+    "💥 Round 5: Grand Final": {"round": 5, "cutoff": total_teams_count}
 }
 selected_adm_label = st.sidebar.selectbox("Filter Metrics View", list(stage_configurations.keys()))
 current_round_id = stage_configurations[selected_adm_label]["round"]
