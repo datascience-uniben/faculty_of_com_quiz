@@ -67,9 +67,11 @@ def load_allowed_teams():
         try:
             df = pd.read_csv(TEAMS_FILE)
             team_col = [col for col in df.columns if 'team' in col.lower()]
-            return [str(name).strip() for name in df[team_col[0]].dropna().unique()] if team_col else [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
+            teams = [str(name).strip() for name in df[team_col[0]].dropna().unique()] if team_col else [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
+            if teams:
+                return teams
         except Exception:
-            return ["A", "B", "C", "D", "E", "F"]
+            pass
     return ["A", "B", "C", "D", "E", "F"]
 
 ALL_TEAMS = load_allowed_teams()
@@ -98,6 +100,9 @@ def sync_scores_from_github():
         content = base64.b64decode(res.json()["content"]).decode("utf-8")
         try:
             df = pd.read_csv(StringIO(content))
+            # Fallback data if file structure parsed incorrectly
+            if df.empty or "Team" not in df.columns:
+                return {team: 0 for team in ALL_TEAMS}
             return dict(zip(df["Team"].astype(str), df["Total Score"]))
         except (pd.errors.EmptyDataError, KeyError):
             return {team: 0 for team in ALL_TEAMS}
@@ -161,60 +166,14 @@ if "question_pool" not in st.session_state:
 # -------------------------------
 # ROUND ROBIN OPERATIONS ENGINE
 # -------------------------------
-def initialize_stage_pool(subject_key, round_number, qualified_teams):
-    target_csv = f"{BASE_SUBJECTS[subject_key]}{round_number}.csv"
-    raw_questions = load_questions(target_csv)
-    globally_taken_questions = sync_taken_questions_from_github()
-    cleaned_pool = []
-    
-    if not raw_questions:
-        st.session_state.question_pool = []
-        return
-
-    sample_q = raw_questions[0]
-    headers = [str(k).strip() for k in sample_q.keys()]
-    headers_lower = [h.lower() for h in headers]
-
-    def get_csv_value(row, possible_names):
-        for p in possible_names:
-            if p.lower() in headers_lower:
-                return row.get(headers[headers_lower.index(p.lower())], "N/A")
-        return "N/A"
-
-    for q in raw_questions:
-        q_text = str(get_csv_value(q, ['question', 'q', 'text'])).strip()
-        if q_text in globally_taken_questions or q_text == "_initialization_placeholder_":
-            continue
-
-        standardized_q = {
-            'question': q_text,
-            'optiona': get_csv_value(q, ['optiona', 'option a', 'a']),
-            'optionb': get_csv_value(q, ['optionb', 'option b', 'b']),
-            'optionc': get_csv_value(q, ['optionc', 'option c', 'c']),
-            'optiond': get_csv_value(q, ['optiond', 'option d', 'd']),
-            'optione': get_csv_value(q, ['optione', 'option e', 'e']),
-            'answer': str(get_csv_value(q, ['answer', 'correct', 'ans'])).strip()
-        }
-        cleaned_pool.append(standardized_q)
-        
-    random.shuffle(cleaned_pool)
-    st.session_state.question_pool = cleaned_pool
-    
-    st.session_state.stage_active = True
-    st.session_state.current_stage_teams = qualified_teams
-    st.session_state.team_rotation_index = 0
-    st.session_state.stage_subject = subject_key
-    st.session_state.stage_round_num = round_number
-    st.session_state.team_question_counts = {team: 0 for team in qualified_teams}
-    st.session_state.stage_running_scores = {team: 0 for team in qualified_teams}
-    st.session_state.has_drawn_question = False
-    st.session_state.current_question = None
-
 def advance_to_next_team():
     """Cycles seamlessly to the next eligible team requiring questions."""
     teams = st.session_state.current_stage_teams
     start_idx = st.session_state.team_rotation_index
-    total_needed = 2 if st.session_state.stage_round_num == 5 else 4
+    
+    # Dynamic round limit configuration parameters
+    round_limits = {1: 4, 2: 5, 3: 6, 4: 7, 5: 8}
+    total_needed = round_limits.get(st.session_state.stage_round_num, 4)
     
     all_done = all(st.session_state.team_question_counts.get(t, 0) >= total_needed for t in teams)
     if all_done:
@@ -278,6 +237,55 @@ def terminate_interleaved_stage():
     st.success("🎉 Stage bracket complete! Standings pushed to GitHub database.")
     time.sleep(2.0)
 
+def initialize_stage_pool(subject_key, round_number, qualified_teams):
+    target_csv = f"{BASE_SUBJECTS[subject_key]}{round_number}.csv"
+    raw_questions = load_questions(target_csv)
+    globally_taken_questions = sync_taken_questions_from_github()
+    cleaned_pool = []
+    
+    if not raw_questions:
+        st.session_state.question_pool = []
+        return
+
+    sample_q = raw_questions[0]
+    headers = [str(k).strip() for k in sample_q.keys()]
+    headers_lower = [h.lower() for h in headers]
+
+    def get_csv_value(row, possible_names):
+        for p in possible_names:
+            if p.lower() in headers_lower:
+                return row.get(headers[headers_lower.index(p.lower())], "N/A")
+        return "N/A"
+
+    for q in raw_questions:
+        q_text = str(get_csv_value(q, ['question', 'q', 'text'])).strip()
+        if q_text in globally_taken_questions or q_text == "_initialization_placeholder_":
+            continue
+
+        standardized_q = {
+            'question': q_text,
+            'optiona': get_csv_value(q, ['optiona', 'option a', 'a']),
+            'optionb': get_csv_value(q, ['optionb', 'option b', 'b']),
+            'optionc': get_csv_value(q, ['optionc', 'option c', 'c']),
+            'optiond': get_csv_value(q, ['optiond', 'option d', 'd']),
+            'optione': get_csv_value(q, ['optione', 'option e', 'e']),
+            'answer': str(get_csv_value(q, ['answer', 'correct', 'ans'])).strip()
+        }
+        cleaned_pool.append(standardized_q)
+        
+    random.shuffle(cleaned_pool)
+    st.session_state.question_pool = cleaned_pool
+    
+    st.session_state.stage_active = True
+    st.session_state.current_stage_teams = qualified_teams
+    st.session_state.team_rotation_index = 0
+    st.session_state.stage_subject = subject_key
+    st.session_state.stage_round_num = round_number
+    st.session_state.team_question_counts = {team: 0 for team in qualified_teams}
+    st.session_state.stage_running_scores = {team: 0 for team in qualified_teams}
+    st.session_state.has_drawn_question = False
+    st.session_state.current_question = None
+
 # -------------------------------
 # USER INTERFACE SETUP
 # -------------------------------
@@ -287,6 +295,11 @@ with col_logo:
     else: st.write("🏆")
 with col_title:
     st.markdown("<h1 style='margin-top: -5px;'>Faculty of Computing Quiz Competition</h1>", unsafe_allow_html=True)
+
+# Ensure session score structures can safely map even if database structure was blank
+for team in ALL_TEAMS:
+    if team not in st.session_state.scores:
+        st.session_state.scores[team] = 0
 
 sorted_standings = sorted(st.session_state.scores.items(), key=lambda x: x[1], reverse=True)
 ranked_team_list = [team for team, score in sorted_standings if team in ALL_TEAMS]
@@ -314,18 +327,21 @@ if st.sidebar.button("🚀 Initialize Interleaved Stage Round", disabled=st.sess
 
 # --- INTERLEAVED GAMEPLAY MATRIX PANEL ---
 if st.session_state.stage_active:
-    # Defend against Empty / Failed State initialization
+    # Defend against Empty / Failed State initializations
     if not st.session_state.current_stage_teams:
-        st.error("⚠️ No eligible teams could be evaluated for this bracket stage. Force resetting.")
+        st.error("⚠️ No eligible teams evaluated for this bracket stage. Force resetting.")
         st.session_state.stage_active = False
         st.rerun()
         
-    # Prevent Index out of Bounds
+    # Prevent Index out of Bounds IndexError
     if st.session_state.team_rotation_index >= len(st.session_state.current_stage_teams):
         st.session_state.team_rotation_index = 0
 
     current_team = st.session_state.current_stage_teams[st.session_state.team_rotation_index]
-    total_draw_limit = 2 if st.session_state.stage_round_num == 5 else 4
+    
+    # Updated dynamic metrics per round request structure mapping
+    round_limits = {1: 4, 2: 5, 3: 6, 4: 7, 5: 8}
+    total_draw_limit = round_limits.get(st.session_state.stage_round_num, 4)
     
     st.markdown(f"### 🎯 Match Matrix Active: **{st.session_state.stage_subject} (Round {st.session_state.stage_round_num})**")
     
@@ -396,7 +412,7 @@ if st.session_state.stage_active:
                 advance_to_next_team()
                 st.rerun()
             
-            # Formatted timer script loop safely isolated strictly inside target question element bounds
+            # Formatted timer loop execution safely isolated within countdown bounds
             time.sleep(0.1)
             st.rerun()
                 
