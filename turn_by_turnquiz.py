@@ -216,7 +216,7 @@ def advance_to_next_team():
     start_idx = st.session_state.team_rotation_index
     total_needed = 2 if st.session_state.stage_round_num == 5 else 4
     
-    all_done = all(st.session_state.team_question_counts[t] >= total_needed for t in teams)
+    all_done = all(st.session_state.team_question_counts.get(t, 0) >= total_needed for t in teams)
     if all_done:
         terminate_interleaved_stage()
         return
@@ -224,7 +224,7 @@ def advance_to_next_team():
     for i in range(len(teams)):
         next_idx = (start_idx + 1 + i) % len(teams)
         target_team = teams[next_idx]
-        if st.session_state.team_question_counts[target_team] < total_needed:
+        if st.session_state.team_question_counts.get(target_team, 0) < total_needed:
             st.session_state.team_rotation_index = next_idx
             st.session_state.has_drawn_question = False
             st.session_state.current_question = None
@@ -242,7 +242,12 @@ def draw_interleaved_question():
         if q['question'] not in globally_taken:
             globally_taken.append(q['question'])
             df_taken = pd.DataFrame(globally_taken, columns=["question"])
-            current_active_team = st.session_state.current_stage_teams[st.session_state.team_rotation_index]
+            
+            if st.session_state.current_stage_teams and st.session_state.team_rotation_index < len(st.session_state.current_stage_teams):
+                current_active_team = st.session_state.current_stage_teams[st.session_state.team_rotation_index]
+            else:
+                current_active_team = "Unknown"
+                
             push_file_to_github(TAKEN_QUESTIONS_FILE, df_taken, f"Marked used by: {current_active_team}")
     else:
         st.session_state.current_question = None
@@ -309,6 +314,16 @@ if st.sidebar.button("🚀 Initialize Interleaved Stage Round", disabled=st.sess
 
 # --- INTERLEAVED GAMEPLAY MATRIX PANEL ---
 if st.session_state.stage_active:
+    # Defend against Empty / Failed State initialization
+    if not st.session_state.current_stage_teams:
+        st.error("⚠️ No eligible teams could be evaluated for this bracket stage. Force resetting.")
+        st.session_state.stage_active = False
+        st.rerun()
+        
+    # Prevent Index out of Bounds
+    if st.session_state.team_rotation_index >= len(st.session_state.current_stage_teams):
+        st.session_state.team_rotation_index = 0
+
     current_team = st.session_state.current_stage_teams[st.session_state.team_rotation_index]
     total_draw_limit = 2 if st.session_state.stage_round_num == 5 else 4
     
@@ -318,14 +333,16 @@ if st.session_state.stage_active:
     for index, t_name in enumerate(st.session_state.current_stage_teams):
         with cols_matrix[index]:
             is_active_marker = "👉 " if t_name == current_team else ""
+            q_count = st.session_state.team_question_counts.get(t_name, 0)
+            s_score = st.session_state.stage_running_scores.get(t_name, 0)
             st.metric(
                 label=f"{is_active_marker}Team {t_name}", 
-                value=f"{st.session_state.team_question_counts[t_name]} / {total_draw_limit} Qs",
-                delta=f"{st.session_state.stage_running_scores[t_name]} Points"
+                value=f"{q_count} / {total_draw_limit} Qs",
+                delta=f"{s_score} Points"
             )
 
     st.write("---")
-    st.markdown(f"#### 🎭 Current Active Slot: **Team {current_team}** (Question #{st.session_state.team_question_counts[current_team] + 1})")
+    st.markdown(f"#### 🎭 Current Active Slot: **Team {current_team}** (Question #{st.session_state.team_question_counts.get(current_team, 0) + 1})")
 
     if not st.session_state.has_drawn_question:
         if st.button(f"🎲 Draw Random Question for Team {current_team}", type="primary"):
@@ -337,7 +354,7 @@ if st.session_state.stage_active:
         
         if remaining_seconds <= 0:
             st.toast("⏰ Time ran out for this question!", icon="❌")
-            st.session_state.team_question_counts[current_team] += 1
+            st.session_state.team_question_counts[current_team] = st.session_state.team_question_counts.get(current_team, 0) + 1
             advance_to_next_team()
             st.rerun()
         else:
@@ -351,35 +368,35 @@ if st.session_state.stage_active:
             if q:
                 st.markdown(f"#### **Question Context:**\n> {q['question']}")
                 options = [f"A: {q.get('optiona','N/A')}", f"B: {q.get('optionb','N/A')}", f"C: {q.get('optionc','N/A')}", f"D: {q.get('optiond','N/A')}", f"E: {q.get('optione','N/A')}"]
-                choice = st.radio("Choose Your Team's Definitive Answer:", options, index=None, key=f"interleaved_{current_team}_{st.session_state.team_question_counts[current_team]}")
+                choice = st.radio("Choose Your Team's Definitive Answer:", options, index=None, key=f"interleaved_{current_team}_{st.session_state.team_question_counts.get(current_team, 0)}")
                 
                 col1, col2 = st.columns([1, 4])
                 with col1:
                     if st.button("Submit Answer", type="primary"):
                         if choice:
                             if choice[0].upper() == str(q['answer']).strip().upper():
-                                st.session_state.stage_running_scores[current_team] += 1
+                                st.session_state.stage_running_scores[current_team] = st.session_state.stage_running_scores.get(current_team, 0) + 1
                                 st.toast("Correct! 🎉", icon="✅")
                             else:
                                 st.toast(f"Wrong! Correct was {q['answer']}", icon="❌")
                             
-                            st.session_state.team_question_counts[current_team] += 1
+                            st.session_state.team_question_counts[current_team] = st.session_state.team_question_counts.get(current_team, 0) + 1
                             advance_to_next_team()
                             st.rerun()
                         else:
                             st.warning("Please select an option before committing!")
                 with col2:
                     if st.button("⏭️ Skip / Burn Question"):
-                        st.session_state.team_question_counts[current_team] += 1
+                        st.session_state.team_question_counts[current_team] = st.session_state.team_question_counts.get(current_team, 0) + 1
                         advance_to_next_team()
                         st.rerun()
             else:
                 st.warning("Question pool completely depleted. Skipping turn forward.")
-                st.session_state.team_question_counts[current_team] += 1
+                st.session_state.team_question_counts[current_team] = st.session_state.team_question_counts.get(current_team, 0) + 1
                 advance_to_next_team()
                 st.rerun()
             
-            # FIXED: Nested execution loop to update countdown timer without locking input elements
+            # Formatted timer script loop safely isolated strictly inside target question element bounds
             time.sleep(0.1)
             st.rerun()
                 
