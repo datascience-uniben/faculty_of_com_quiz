@@ -11,7 +11,7 @@ from io import StringIO
 # Set page configuration (MUST BE FIRST)
 st.set_page_config(
     page_title="Faculty Quiz Admin Portal",
-    page_icon="uniben.png",  
+    page_icon="logo.png",  
     layout="wide"
 )
 
