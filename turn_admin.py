@@ -32,9 +32,6 @@ HEADERS = {
     "Accept": "application/vnd.github.v3+json"
 }
 
-# HARDCODED DEPARTMENT LIST FALLBACK
-DEFAULT_DEPARTMENTS = ["Computer_Science", "Data_Science", "Cyber_Security", "ICT", "Info_Techn", "Software"]
-
 def load_allowed_teams():
     url_teams = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{TEAMS_FILE}"
     try:
@@ -42,16 +39,13 @@ def load_allowed_teams():
         if res.status_code == 200:
             content = base64.b64decode(res.json()["content"]).decode("utf-8")
             df = pd.read_csv(StringIO(content))
-            team_col = [col for col in df.columns if 'team' in col.lower() or 'team' in str(df.columns[0]).lower()]
+            team_col = [col for col in df.columns if 'team' in col.lower()]
             if team_col:
-                teams = [str(name).strip() for name in df[team_col[0]].dropna().unique()]
-            else:
-                teams = [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
-            if teams:
-                return teams
+                return [str(name).strip() for name in df[team_col[0]].dropna().unique()]
+            return [str(name).strip() for name in df.iloc[:, 0].dropna().unique()]
     except Exception:
         pass
-    return DEFAULT_DEPARTMENTS
+    return ["A", "B", "C", "D", "E", "F"]
 
 ALL_TEAMS = load_allowed_teams()
 
@@ -101,16 +95,6 @@ def load_dashboard_data_from_github():
         
     return df_scores, df_rounds
 
-def push_file_to_github(file_path, dataframe, commit_message):
-    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{file_path}"
-    csv_string = dataframe.to_csv(index=False)
-    encoded_content = base64.b64encode(csv_string.encode("utf-8")).decode("utf-8")
-    response = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
-    file_sha = response.json().get("sha") if response.status_code == 200 else None
-    payload = {"message": commit_message, "content": encoded_content, "branch": BRANCH}
-    if file_sha: payload["sha"] = file_sha
-    return requests.put(url, headers=HEADERS, data=json.dumps(payload)).status_code in [200, 201]
-
 @st.fragment(run_every=4.0) 
 def render_live_monitoring_view():
     df_scores, df_rounds = load_dashboard_data_from_github()
@@ -131,31 +115,19 @@ def render_live_monitoring_view():
             cutoff = stage["cutoff"]
             if len(ranked_teams) >= cutoff and i != 4:
                 borderline_team = ranked_teams[cutoff - 1]
-                st.metric(label=stage["title"], value="Active Bracket", delta=f"Cutoff: {borderline_team}")
+                st.metric(label=stage["title"], value="Active Bracket", delta=f"Cutoff: Team {borderline_team}")
             else:
                 st.metric(label=stage["title"], value="Sudden-Death Ready" if i==4 else "Calculating...")
                 
     st.write("---")
+    
     col1, col2 = st.columns([1, 1.4], gap="large")
     
     with col1:
         st.subheader("🏆 Leaderboard Standings Matrix")
         if not df_scores.empty and len(df_scores) > 1:
-            st.success(f"⭐ **Current Leader:** {df_scores.iloc[0]['Team']} ({df_scores.iloc[0]['Total Score']} pts)")
-            
-            least_row_index = len(df_scores) - 1
-            least_team = df_scores.iloc[least_row_index]["Team"]
-            least_score = df_scores.iloc[least_row_index]["Total Score"]
-            st.error(f"🚨 **Elimination Zone:** {least_team} is last with {least_score} pts")
-            
-            st.markdown("### ❌ Active Round Elimination")
-            if st.button(f"💥 Eliminate {least_team} from Next Round", type="primary", use_container_width=True):
-                updated_teams = [t for t in ALL_TEAMS if str(t) != str(least_team)]
-                df_teams_new = pd.DataFrame({"Teams": updated_teams})
-                if push_file_to_github(TEAMS_FILE, df_teams_new, f"Eliminated least department: {least_team}"):
-                    st.success(f"{least_team} has been removed from `team.csv`!")
-                    time.sleep(1.0)
-                    st.rerun()
+            st.success(f"⭐ **Current Leader:** Team {df_scores.iloc[0]['Team']} ({df_scores.iloc[0]['Total Score']} pts)")
+            st.error(f"🚨 **Bottom Tier (Removal Zone):** Team {df_scores.iloc[-1]['Team']} ({df_scores.iloc[-1]['Total Score']} pts)")
             
         st.dataframe(
             df_scores.set_index("Team"), 
@@ -245,11 +217,9 @@ else:
     st.sidebar.error("❗ PERMANENTLY WIPE DATABASE?")
     col_yes, col_no = st.sidebar.columns(2)
     if col_yes.button("Yes, Wipe", type="primary", use_container_width=True):
-        # INITIALIZING WIPE MAP USING THE NEW DEPARTMENT FALLBACK NAMES NATIVELY
-        fresh_scores = pd.DataFrame(list({t: 0 for t in DEFAULT_DEPARTMENTS}.items()), columns=["Team", "Total Score"])
+        fresh_scores = pd.DataFrame(list({t: 0 for t in ALL_TEAMS}.items()), columns=["Team", "Total Score"])
         fresh_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
         fresh_taken = pd.DataFrame({"question": ["_initialization_placeholder_"]}) 
-        fresh_teams = pd.DataFrame({"Teams": DEFAULT_DEPARTMENTS})
         
         def api_wipe(path, df):
             url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{path}"
@@ -257,14 +227,13 @@ else:
             encoded = base64.b64encode(csv_str.encode("utf-8")).decode("utf-8")
             res = requests.get(url, headers=HEADERS, params={"ref": BRANCH})
             sha = res.json().get("sha") if res.status_code == 200 else None
-            p_load = {"message": "💥 Admin Wipe Reset", "content": encoded, "branch": BRANCH}
+            p_load = {"message": "💥 Admin Wipe", "content": encoded, "branch": BRANCH}
             if sha: p_load["sha"] = sha
             requests.put(url, headers=HEADERS, data=json.dumps(p_load))
 
         api_wipe(SCORES_FILE, fresh_scores)
         api_wipe(ROUNDS_FILE, fresh_rounds)
         api_wipe(TAKEN_QUESTIONS_FILE, fresh_taken) 
-        api_wipe(TEAMS_FILE, fresh_teams)
         st.session_state.confirm_reset = False
         st.toast("GitHub records wiped clean! 🧹", icon="✅")
         time.sleep(0.5)
