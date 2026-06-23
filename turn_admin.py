@@ -95,6 +95,20 @@ def load_dashboard_data_from_github():
         
     return df_scores, df_rounds
 
+# Sidebar selectors mirroring the exact filtered tracking criteria logic
+st.sidebar.header("Active Round View Filter")
+total_teams_count = len(ALL_TEAMS)
+stage_configurations = {
+    "Round 1: Preliminary": {"round": 1, "cutoff": total_teams_count},
+    "Round 2: Quarter-Final": {"round": 2, "cutoff": min(5, total_teams_count)},
+    "Round 3: Semi-Final": {"round": 3, "cutoff": min(4, total_teams_count)},
+    "Round 4: Third-Place Playoff": {"round": 4, "cutoff": min(3, total_teams_count)},
+    "💥 Round 5: Sudden Death": {"round": 5, "cutoff": total_teams_count}
+}
+selected_adm_label = st.sidebar.selectbox("Filter Metrics View", list(stage_configurations.keys()))
+current_round_id = stage_configurations[selected_adm_label]["round"]
+allowed_count = stage_configurations[selected_adm_label]["cutoff"]
+
 @st.fragment(run_every=4.0) 
 def render_live_monitoring_view():
     df_scores, df_rounds = load_dashboard_data_from_github()
@@ -124,13 +138,19 @@ def render_live_monitoring_view():
     col1, col2 = st.columns([1, 1.4], gap="large")
     
     with col1:
-        st.subheader("🏆 Leaderboard Standings Matrix")
-        if not df_scores.empty and len(df_scores) > 1:
-            st.success(f"⭐ **Current Leader:** Team {df_scores.iloc[0]['Team']} ({df_scores.iloc[0]['Total Score']} pts)")
-            st.error(f"🚨 **Bottom Tier (Removal Zone):** Team {df_scores.iloc[-1]['Team']} ({df_scores.iloc[-1]['Total Score']} pts)")
+        st.subheader(f"🏆 Leaderboard ({selected_adm_label})")
+        
+        # Adjust leaderboard row tracking to filter on teams remaining for this round choice
+        current_cutoff = allowed_count if current_round_id != 5 else len(ALL_TEAMS)
+        round_visible_teams = ranked_teams[:current_cutoff]
+        filtered_scores_df = df_scores[df_scores["Team"].isin(round_visible_teams)].copy().reset_index(drop=True)
+        
+        if not filtered_scores_df.empty and len(filtered_scores_df) > 1:
+            st.success(f"⭐ **Current Leader:** Team {filtered_scores_df.iloc[0]['Team']} ({filtered_scores_df.iloc[0]['Total Score']} pts)")
+            st.error(f"🚨 **Bottom Tier (Removal Zone):** Team {filtered_scores_df.iloc[-1]['Team']} ({filtered_scores_df.iloc[-1]['Total Score']} pts)")
             
         st.dataframe(
-            df_scores.set_index("Team"), 
+            filtered_scores_df.set_index("Team"), 
             use_container_width=True,
             column_config={"Total Score": st.column_config.NumberColumn(format="%d Points")}
         )
@@ -145,7 +165,7 @@ def render_live_monitoring_view():
         score_col = "points scored" if "points scored" in df_rounds.columns else (df_rounds.columns[3] if not df_rounds.empty else None)
 
         matrix_data = []
-        for team in ALL_TEAMS:
+        for team in round_visible_teams:
             team_logs = df_rounds[df_rounds[team_col].astype(str).str.lower() == str(team).lower()] if team_col else pd.DataFrame()
             
             def extract_cell(round_str, category_keyword):
@@ -158,7 +178,6 @@ def render_live_monitoring_view():
                 ]
                 
                 if not match_rows.empty:
-                    # Dynamically calculate question limits based on target round requested
                     if "round 1" in round_str.lower(): max_score = 4
                     elif "round 2" in round_str.lower(): max_score = 5
                     elif "round 3" in round_str.lower(): max_score = 6
@@ -185,10 +204,13 @@ def render_live_monitoring_view():
                 "Aggregate": f"{total_pts} pts"
             })
             
-        df_matrix = pd.DataFrame(matrix_data)
-        df_matrix["_sort_idx"] = df_matrix["Team"].apply(lambda x: ranked_teams.index(x) if x in ranked_teams else 99)
-        df_matrix = df_matrix.sort_values("_sort_idx").drop(columns=["_sort_idx"]).reset_index(drop=True)
-        st.dataframe(df_matrix.set_index("Team"), use_container_width=True)
+        if matrix_data:
+            df_matrix = pd.DataFrame(matrix_data)
+            df_matrix["_sort_idx"] = df_matrix["Team"].apply(lambda x: ranked_teams.index(x) if x in ranked_teams else 99)
+            df_matrix = df_matrix.sort_values("_sort_idx").drop(columns=["_sort_idx"]).reset_index(drop=True)
+            st.dataframe(df_matrix.set_index("Team"), use_container_width=True)
+        else:
+            st.info("No active teams logged for this filtered context view segment.")
 
 render_live_monitoring_view()
 
