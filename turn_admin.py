@@ -120,7 +120,7 @@ def render_live_monitoring_view():
         {"title": "Round 2 (Top 5)", "cutoff": 5},
         {"title": "Round 3 (Top 4)", "cutoff": 4},
         {"title": "Round 4 (Top 3)", "cutoff": 3},
-        {"title": "💥 Round 5 (Grand Fanal)", "cutoff": len(ALL_TEAMS)}
+        {"title": "💥 Round 5 (Grand Final)", "cutoff": len(ALL_TEAMS)}
     ]
     
     cols = st.columns(5)
