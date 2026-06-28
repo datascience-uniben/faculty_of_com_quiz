@@ -167,6 +167,8 @@ if "stage_subject" not in st.session_state:
     st.session_state.stage_subject = None
 if "question_pool" not in st.session_state:
     st.session_state.question_pool = []
+if "admin_authenticated" not in st.session_state:
+    st.session_state.admin_authenticated = False
 
 # -------------------------------
 # ROUND ROBIN OPERATIONS ENGINE
@@ -331,41 +333,58 @@ if st.sidebar.button("🚀 Initialize Interleaved Stage Round", disabled=st.sess
 # --- ADMIN MANAGEMENT OVERRIDE CONTAINER ---
 st.sidebar.markdown("---")
 with st.sidebar.expander("🛠️ Admin Controls", expanded=False):
-    st.markdown("### Score Override")
-    override_team = st.selectbox("Select Target Team", ALL_TEAMS)
-    new_score_val = st.number_input("Assign Total Score", min_value=0, value=st.session_state.scores.get(override_team, 0))
-    
-    if st.button(f"Update Team {override_team} Score"):
-        st.session_state.scores[override_team] = new_score_val
-        df_scores_override = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
-        if push_file_to_github(SCORES_FILE, df_scores_override, f"Admin override score for Team {override_team}"):
-            st.success(f"Score for Team {override_team} modified successfully!")
-            time.sleep(1)
-            st.rerun()
-        else:
-            st.error("Failed to sync change to GitHub database.")
+    if not st.session_state.admin_authenticated:
+        st.markdown("### 🔒 Security Verification Required")
+        input_passcode = st.text_input("Enter Admin Passcode:", type="password", key="admin_passcode_field")
+        
+        if st.button("Verify Identity"):
+            if input_passcode == "data_science":
+                st.session_state.admin_authenticated = True
+                st.success("Access Granted!")
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.error("Incorrect passcode. Access denied.")
+    else:
+        st.markdown("### Score Override")
+        override_team = st.selectbox("Select Target Team", ALL_TEAMS)
+        new_score_val = st.number_input("Assign Total Score", min_value=0, value=st.session_state.scores.get(override_team, 0))
+        
+        if st.button(f"Update Team {override_team} Score"):
+            st.session_state.scores[override_team] = new_score_val
+            df_scores_override = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
+            if push_file_to_github(SCORES_FILE, df_scores_override, f"Admin override score for Team {override_team}"):
+                st.success(f"Score for Team {override_team} modified successfully!")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Failed to sync change to GitHub database.")
 
-    st.markdown("---")
-    st.markdown("### System Reset Engine")
-    st.warning("This action will completely wipe tournament progress logs.")
-    if st.button("🚨 Reset Entire Tournament Data", type="primary"):
-        fresh_scores = pd.DataFrame([{"Team": t, "Total Score": 0} for t in ALL_TEAMS])
-        fresh_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
-        fresh_taken = pd.DataFrame(columns=["question"])
-        
-        s1 = push_file_to_github(SCORES_FILE, fresh_scores, "Admin Factory Reset: Scores")
-        s2 = push_file_to_github(ROUNDS_FILE, fresh_rounds, "Admin Factory Reset: Rounds Log")
-        s3 = push_file_to_github(TAKEN_QUESTIONS_FILE, fresh_taken, "Admin Factory Reset: Question History")
-        
-        if s1 and s2 and s3:
-            st.session_state.scores = {team: 0 for team in ALL_TEAMS}
-            st.session_state.completed_rounds = []
-            st.session_state.stage_active = False
-            st.success("Tournament successfully reset to original state!")
-            time.sleep(1.5)
+        st.markdown("---")
+        st.markdown("### System Reset Engine")
+        st.warning("This action will completely wipe tournament progress logs.")
+        if st.button("🚨 Reset Entire Tournament Data", type="primary"):
+            fresh_scores = pd.DataFrame([{"Team": t, "Total Score": 0} for t in ALL_TEAMS])
+            fresh_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
+            fresh_taken = pd.DataFrame(columns=["question"])
+            
+            s1 = push_file_to_github(SCORES_FILE, fresh_scores, "Admin Factory Reset: Scores")
+            s2 = push_file_to_github(ROUNDS_FILE, fresh_rounds, "Admin Factory Reset: Rounds Log")
+            s3 = push_file_to_github(TAKEN_QUESTIONS_FILE, fresh_taken, "Admin Factory Reset: Question History")
+            
+            if s1 and s2 and s3:
+                st.session_state.scores = {team: 0 for team in ALL_TEAMS}
+                st.session_state.completed_rounds = []
+                st.session_state.stage_active = False
+                st.success("Tournament successfully reset to original state!")
+                time.sleep(1.5)
+                st.rerun()
+            else:
+                st.error("Error committing repository modifications.")
+                
+        if st.button("🔒 Lock Admin Panel"):
+            st.session_state.admin_authenticated = False
             st.rerun()
-        else:
-            st.error("Error committing repository modifications.")
 
 # --- INTERLEAVED GAMEPLAY MATRIX PANEL ---
 if st.session_state.stage_active:
@@ -405,7 +424,7 @@ if st.session_state.stage_active:
             st.rerun()
     else:
         elapsed_time = time.time() - st.session_state.question_start_time
-        remaining_seconds = max(0, 120 - int(elapsed_time))  # 2 Minutes (120 Seconds) Timer Limit
+        remaining_seconds = max(0, 120 - int(elapsed_time))
         
         if remaining_seconds <= 0:
             st.toast("⏰ Time ran out for this question!", icon="❌")
