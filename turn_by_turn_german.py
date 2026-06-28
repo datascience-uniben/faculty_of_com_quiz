@@ -195,7 +195,8 @@ def advance_to_next_team():
             st.session_state.question_start_time = None
             return
 
-def draw_interleaved_question():
+def draw_interleaved_question_callback():
+    """Callback execution block that guarantees synchronization on button click."""
     if st.session_state.question_pool:
         q = st.session_state.question_pool.pop()
         st.session_state.current_question = q
@@ -419,9 +420,12 @@ if st.session_state.stage_active:
     st.markdown(f"#### 🎭 Current Active Slot: **Team {current_team}** (Question #{st.session_state.team_question_counts.get(current_team, 0) + 1})")
 
     if not st.session_state.has_drawn_question:
-        if st.button(f"🎲 Draw Random Question for Team {current_team}", type="primary"):
-            draw_interleaved_question()
-            st.rerun()
+        # Changed button structure to utilize explicit callback function architecture
+        st.button(
+            f"🎲 Draw Random Question for Team {current_team}", 
+            type="primary",
+            on_click=draw_interleaved_question_callback
+        )
     else:
         elapsed_time = time.time() - st.session_state.question_start_time
         remaining_seconds = max(0, 120 - int(elapsed_time))
