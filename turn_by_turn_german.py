@@ -14,7 +14,7 @@ from io import StringIO
 # -------------------------------
 st.set_page_config(
     page_title="Faculty of Computing Quiz Competition",
-    page_icon="logo.png",  
+    page_icon="uniben.png",  
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -86,10 +86,12 @@ def get_base64_image(file_path):
 def load_questions(file_name):
     try:
         df = pd.read_csv(file_name, encoding="cp1252")
+        # Clean white spaces and force lowercase on headers right out of the box
+        df.columns = [str(c).strip().lower() for c in df.columns]
         return df.to_dict(orient="records")
-    except Exception:
+    except Exception as e:
         return [{
-            "question": f"⚠️ Missing File Notice: Please upload '{file_name}' to repository.",
+            "question": f"⚠️ Missing or Malformed File Notice: Please upload '{file_name}' to repository. Error: {str(e)}",
             "answer": "err"
         }]
 
@@ -100,9 +102,13 @@ def sync_scores_from_github():
         content = base64.b64decode(res.json()["content"]).decode("utf-8")
         try:
             df = pd.read_csv(StringIO(content))
-            if df.empty or "Team" not in df.columns:
+            df.columns = [str(c).strip().lower() for c in df.columns]
+            team_header = "team" if "team" in df.columns else df.columns[0] if not df.empty else "team"
+            score_header = "total score" if "total score" in df.columns else df.columns[1] if len(df.columns) > 1 else "total score"
+            
+            if df.empty or team_header not in df.columns:
                 return {team: 0 for team in ALL_TEAMS}
-            return dict(zip(df["Team"].astype(str), df["Total Score"]))
+            return dict(zip(df[team_header].astype(str), df[score_header].astype(int)))
         except (pd.errors.EmptyDataError, KeyError):
             return {team: 0 for team in ALL_TEAMS}
     return {team: 0 for team in ALL_TEAMS}
@@ -125,6 +131,7 @@ def sync_taken_questions_from_github():
         content = base64.b64decode(res.json()["content"]).decode("utf-8")
         try:
             df = pd.read_csv(StringIO(content))
+            df.columns = [str(c).strip().lower() for c in df.columns]
             if "question" in df.columns:
                 return df["question"].dropna().astype(str).tolist()
             return []
@@ -240,28 +247,20 @@ def initialize_stage_pool(subject_key, round_number, qualified_teams):
     globally_taken_questions = sync_taken_questions_from_github()
     cleaned_pool = []
     
-    if not raw_questions:
+    if not raw_questions or "err" in [q.get('answer') for q in raw_questions]:
         st.session_state.question_pool = []
         return
 
-    sample_q = raw_questions[0]
-    headers = [str(k).strip() for k in sample_q.keys()]
-    headers_lower = [h.lower() for h in headers]
-
-    def get_csv_value(row, possible_names):
-        for p in possible_names:
-            if p.lower() in headers_lower:
-                return row.get(headers[headers_lower.index(p.lower())], "N/A")
-        return "N/A"
-
     for q in raw_questions:
-        q_text = str(get_csv_value(q, ['question', 'q', 'text'])).strip()
-        if q_text in globally_taken_questions or q_text == "_initialization_placeholder_":
+        q_text = str(q.get('question', q.get('q', q.get('text', '')))).strip()
+        q_ans = str(q.get('answer', q.get('correct', q.get('ans', '')))).strip()
+        
+        if not q_text or q_text in globally_taken_questions or q_text == "_initialization_placeholder_":
             continue
 
         standardized_q = {
             'question': q_text,
-            'answer': str(get_csv_value(q, ['answer', 'correct', 'ans'])).strip()
+            'answer': q_ans
         }
         cleaned_pool.append(standardized_q)
         
@@ -316,14 +315,14 @@ stage_configurations = {
     "Round 2: Quarter-Final (Best 5)": {"round": 2, "cutoff": min(5, total_teams_count)},
     "Round 3: Semi-Final (Best 4)": {"round": 3, "cutoff": min(4, total_teams_count)},
     "Round 4: Third-Place Playoff (Best 3)": {"round": 4, "cutoff": min(3, total_teams_count)},
-    "💥 Round 5: Grand Final": {"round": 5, "cutoff": total_teams_count}
+    "💥 Round 5: Grand Final": {"round": 5, "cutoff": min(2, total_teams_count)}
 }
 
 selected_stage_label = st.sidebar.selectbox("Active Match Bracket", list(stage_configurations.keys()), disabled=st.session_state.stage_active)
 current_round_id = stage_configurations[selected_stage_label]["round"]
 allowed_count = stage_configurations[selected_stage_label]["cutoff"]
 
-eligible_teams = ranked_team_list[:allowed_count] if current_round_id != 5 else ALL_TEAMS
+eligible_teams = ranked_team_list[:allowed_count]
 chosen_subject = st.sidebar.selectbox("Choose Subject Area", list(BASE_SUBJECTS.keys()), disabled=st.session_state.stage_active)
 
 if st.sidebar.button("🚀 Initialize Interleaved Stage Round", disabled=st.session_state.stage_active):
@@ -349,7 +348,7 @@ with st.sidebar.expander("🛠️ Admin Controls", expanded=False):
 
     st.markdown("---")
     st.markdown("### System Reset Engine")
-    st.warning("This actions will completely wipe tournament progress logs.")
+    st.warning("This action will completely wipe tournament progress logs.")
     if st.button("🚨 Reset Entire Tournament Data", type="primary"):
         fresh_scores = pd.DataFrame([{"Team": t, "Total Score": 0} for t in ALL_TEAMS])
         fresh_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
