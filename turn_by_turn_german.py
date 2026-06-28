@@ -86,7 +86,6 @@ def get_base64_image(file_path):
 def load_questions(file_name):
     try:
         df = pd.read_csv(file_name, encoding="cp1252")
-        # Clean white spaces and force lowercase on headers right out of the box
         df.columns = [str(c).strip().lower() for c in df.columns]
         return df.to_dict(orient="records")
     except Exception as e:
@@ -406,7 +405,7 @@ if st.session_state.stage_active:
             st.rerun()
     else:
         elapsed_time = time.time() - st.session_state.question_start_time
-        remaining_seconds = max(0, 30 - int(elapsed_time))
+        remaining_seconds = max(0, 120 - int(elapsed_time))  # 2 Minutes (120 Seconds) Timer Limit
         
         if remaining_seconds <= 0:
             st.toast("⏰ Time ran out for this question!", icon="❌")
@@ -414,8 +413,8 @@ if st.session_state.stage_active:
             advance_to_next_team()
             st.rerun()
         else:
-            st.progress(remaining_seconds / 30)
-            if remaining_seconds <= 10:
+            st.progress(remaining_seconds / 120)
+            if remaining_seconds <= 20:
                 st.error(f"⏰ **Time Remaining: {remaining_seconds} seconds!**")
             else:
                 st.warning(f"⏳ Time Remaining: **{remaining_seconds}** seconds")
