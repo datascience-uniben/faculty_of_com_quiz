@@ -35,7 +35,7 @@ HEADERS = {
     "Accept": "application/vnd.github.v3+json"
 }
 
-# UPDATED: Combined subjects mapping into a single selection key
+# COMBINED SUBJECT CONFIGURATION
 BASE_SUBJECTS = {
     "General Computing & Nigeria Current Affairs": "affairs"
 }
@@ -235,7 +235,7 @@ def terminate_interleaved_stage():
     time.sleep(2.0)
 
 def initialize_stage_pool(subject_key, round_number, qualified_teams):
-    target_csv = f"{BASE_SUBJECTS[subject_key]}{round_number}.csv"
+    target_csv = f"{BASE_SUBJECTS[subject_key]}.csv"
     raw_questions = load_questions(target_csv)
     globally_taken_questions = sync_taken_questions_from_github()
     cleaned_pool = []
@@ -278,6 +278,20 @@ def initialize_stage_pool(subject_key, round_number, qualified_teams):
     st.session_state.has_drawn_question = False
     st.session_state.current_question = None
 
+def submit_typed_answer_callback(team_id, correct_ans_string):
+    input_key = f"interleaved_{team_id}_{st.session_state.team_question_counts.get(team_id, 0)}"
+    user_provided_value = st.session_state.get(input_key, "").strip()
+    
+    if user_provided_value:
+        if user_provided_value.lower() == str(correct_ans_string).strip().lower():
+            st.session_state.stage_running_scores[team_id] = st.session_state.stage_running_scores.get(team_id, 0) + 1
+            st.toast("Correct! 🎉", icon="✅")
+        else:
+            st.toast(f"Wrong! Correct answer was: {correct_ans_string}", icon="❌")
+        
+        st.session_state.team_question_counts[team_id] = st.session_state.team_question_counts.get(team_id, 0) + 1
+        advance_to_next_team()
+
 # -------------------------------
 # USER INTERFACE SETUP
 # -------------------------------
@@ -315,6 +329,45 @@ chosen_subject = st.sidebar.selectbox("Choose Subject Area", list(BASE_SUBJECTS.
 if st.sidebar.button("🚀 Initialize Interleaved Stage Round", disabled=st.session_state.stage_active):
     initialize_stage_pool(chosen_subject, current_round_id, eligible_teams)
     st.rerun()
+
+# --- ADMIN MANAGEMENT OVERRIDE CONTAINER ---
+st.sidebar.markdown("---")
+with st.sidebar.expander("🛠️ Admin Controls", expanded=False):
+    st.markdown("### Score Override")
+    override_team = st.selectbox("Select Target Team", ALL_TEAMS)
+    new_score_val = st.number_input("Assign Total Score", min_value=0, value=st.session_state.scores.get(override_team, 0))
+    
+    if st.button(f"Update Team {override_team} Score"):
+        st.session_state.scores[override_team] = new_score_val
+        df_scores_override = pd.DataFrame(list(st.session_state.scores.items()), columns=["Team", "Total Score"])
+        if push_file_to_github(SCORES_FILE, df_scores_override, f"Admin override score for Team {override_team}"):
+            st.success(f"Score for Team {override_team} modified successfully!")
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error("Failed to sync change to GitHub database.")
+
+    st.markdown("---")
+    st.markdown("### System Reset Engine")
+    st.warning("This actions will completely wipe tournament progress logs.")
+    if st.button("🚨 Reset Entire Tournament Data", type="primary"):
+        fresh_scores = pd.DataFrame([{"Team": t, "Total Score": 0} for t in ALL_TEAMS])
+        fresh_rounds = pd.DataFrame(columns=["Team", "Subject", "Bracket Stage", "Points Scored"])
+        fresh_taken = pd.DataFrame(columns=["question"])
+        
+        s1 = push_file_to_github(SCORES_FILE, fresh_scores, "Admin Factory Reset: Scores")
+        s2 = push_file_to_github(ROUNDS_FILE, fresh_rounds, "Admin Factory Reset: Rounds Log")
+        s3 = push_file_to_github(TAKEN_QUESTIONS_FILE, fresh_taken, "Admin Factory Reset: Question History")
+        
+        if s1 and s2 and s3:
+            st.session_state.scores = {team: 0 for team in ALL_TEAMS}
+            st.session_state.completed_rounds = []
+            st.session_state.stage_active = False
+            st.success("Tournament successfully reset to original state!")
+            time.sleep(1.5)
+            st.rerun()
+        else:
+            st.error("Error committing repository modifications.")
 
 # --- INTERLEAVED GAMEPLAY MATRIX PANEL ---
 if st.session_state.stage_active:
@@ -372,28 +425,18 @@ if st.session_state.stage_active:
             if q:
                 st.markdown(f"#### **Question Context:**\n> {q['question']}")
                 
-                typed_answer = st.text_input("Type Your Team's Answer Below:", key=f"interleaved_{current_team}_{st.session_state.team_question_counts.get(current_team, 0)}")
+                text_input_key = f"interleaved_{current_team}_{st.session_state.team_question_counts.get(current_team, 0)}"
+                st.text_input(
+                    "Type Your Team's Answer Below & Press Enter to Submit:", 
+                    key=text_input_key,
+                    on_change=submit_typed_answer_callback,
+                    args=(current_team, q['answer'])
+                )
                 
-                col1, col2 = st.columns([1, 4])
-                with col1:
-                    if st.button("Submit Answer", type="primary"):
-                        if typed_answer.strip():
-                            if typed_answer.strip().lower() == str(q['answer']).strip().lower():
-                                st.session_state.stage_running_scores[current_team] = st.session_state.stage_running_scores.get(current_team, 0) + 1
-                                st.toast("Correct! 🎉", icon="✅")
-                            else:
-                                st.toast(f"Wrong! Correct answer was: {q['answer']}", icon="❌")
-                            
-                            st.session_state.team_question_counts[current_team] = st.session_state.team_question_counts.get(current_team, 0) + 1
-                            advance_to_next_team()
-                            st.rerun()
-                        else:
-                            st.warning("Please type an answer before submitting!")
-                with col2:
-                    if st.button("⏭️ Skip / Burn Question"):
-                        st.session_state.team_question_counts[current_team] = st.session_state.team_question_counts.get(current_team, 0) + 1
-                        advance_to_next_team()
-                        st.rerun()
+                if st.button("⏭️ Skip / Burn Question"):
+                    st.session_state.team_question_counts[current_team] = st.session_state.team_question_counts.get(current_team, 0) + 1
+                    advance_to_next_team()
+                    st.rerun()
             else:
                 st.warning("Question pool completely depleted. Skipping turn forward.")
                 st.session_state.team_question_counts[current_team] = st.session_state.team_question_counts.get(current_team, 0) + 1
