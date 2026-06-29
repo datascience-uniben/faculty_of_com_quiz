@@ -196,7 +196,6 @@ def advance_to_next_team():
             return
 
 def draw_interleaved_question_callback():
-    """Callback execution block that guarantees synchronization on button click."""
     if st.session_state.question_pool:
         q = st.session_state.question_pool.pop()
         st.session_state.current_question = q
@@ -251,6 +250,7 @@ def initialize_stage_pool(subject_key, round_number, qualified_teams):
     
     if not raw_questions or "err" in [q.get('answer') for q in raw_questions]:
         st.session_state.question_pool = []
+        st.error(f"❌ Could not load questions from {target_csv}. Ensure the file exists and is populated.")
         return
 
     for q in raw_questions:
@@ -266,6 +266,11 @@ def initialize_stage_pool(subject_key, round_number, qualified_teams):
         }
         cleaned_pool.append(standardized_q)
         
+    if not cleaned_pool:
+        st.session_state.question_pool = []
+        st.error("⚠️ The question pool is completely empty! All questions might already be in taken_questions.csv.")
+        return
+
     random.shuffle(cleaned_pool)
     st.session_state.question_pool = cleaned_pool
     
@@ -420,10 +425,14 @@ if st.session_state.stage_active:
     st.markdown(f"#### 🎭 Current Active Slot: **Team {current_team}** (Question #{st.session_state.team_question_counts.get(current_team, 0) + 1})")
 
     if not st.session_state.has_drawn_question:
+        if not st.session_state.question_pool:
+            st.warning("⚠️ Question pool is dry. Run a reset under Admin Controls or add items to affairs.csv.")
+        
         st.button(
             f"🎲 Draw Random Question for Team {current_team}", 
             type="primary",
-            on_click=draw_interleaved_question_callback
+            on_click=draw_interleaved_question_callback,
+            disabled=not st.session_state.question_pool
         )
     else:
         elapsed_time = time.time() - st.session_state.question_start_time
@@ -458,12 +467,11 @@ if st.session_state.stage_active:
                     advance_to_next_team()
                     st.rerun()
             else:
-                st.warning("Question pool completely depleted. Skipping turn forward.")
+                st.warning("Question processing anomaly. Advancing slot.")
                 st.session_state.team_question_counts[current_team] = st.session_state.team_question_counts.get(current_team, 0) + 1
                 advance_to_next_team()
                 st.rerun()
             
-            # FIXED: Only trigger rerun if time is ticking down to prevent UI rendering dropouts
             if remaining_seconds > 0:
                 time.sleep(1.0)
                 st.rerun()
