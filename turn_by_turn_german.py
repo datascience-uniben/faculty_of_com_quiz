@@ -14,7 +14,7 @@ from io import StringIO
 # -------------------------------
 st.set_page_config(
     page_title="Faculty of Computing Quiz Competition",
-    page_icon="logo.png",  
+    page_icon="uniben.png",  
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -420,7 +420,6 @@ if st.session_state.stage_active:
     st.markdown(f"#### 🎭 Current Active Slot: **Team {current_team}** (Question #{st.session_state.team_question_counts.get(current_team, 0) + 1})")
 
     if not st.session_state.has_drawn_question:
-        # Changed button structure to utilize explicit callback function architecture
         st.button(
             f"🎲 Draw Random Question for Team {current_team}", 
             type="primary",
@@ -464,8 +463,10 @@ if st.session_state.stage_active:
                 advance_to_next_team()
                 st.rerun()
             
-            time.sleep(0.1)
-            st.rerun()
+            # FIXED: Only trigger rerun if time is ticking down to prevent UI rendering dropouts
+            if remaining_seconds > 0:
+                time.sleep(1.0)
+                st.rerun()
                 
     if st.sidebar.button("🚨 Force Terminate Current Stage"):
         st.session_state.stage_active = False
