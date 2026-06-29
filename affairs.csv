@@ -1,0 +1,146 @@
+question,answer
+What malware disguises itself as harmless and legitimate software?,trojan horse
+Which type of computer is the fastest and most expensive?,supercomputer
+______ is unsolicited and unwanted electronic messages sent in bulk,spam
+Which language translator converts an entire high-level language program into machine language before execution?,compiler
+What memory holds a computer's start up instructions?,read only memory
+Which communication medium uses light-conducting glass to transmit large amounts of data at very high speeds?,fibre optics
+What device routes data packets between different networks?,router
+Which type of RAM requires periodic refreshing to retain data?,dram
+Which machine is regarded as the world's first general-purpose electronic computer?,eniac
+What does URL stand for?,uniform resource locator
+Which networking device operates at the physical layer and simply regenerates or boosts signals without altering the information being transmitted?,repeater
+What software manages computer hardware and application?,operating system
+_______ involves saving data on remote internet servers instead of local hard drive.,cloud storage
+The network of physical objects connected to the internet is called ____.,internet of things
+What is the major characteristic of fourth-generation computers?,microprocessors
+What unique numeric address identifies a device on a network?,internet protocol 
+Which type of printer produces output by striking an inked ribbon against paper?,impact printer
+_____ is malicious / harmful program that replicates itself to damage computer systems.,virus
+What technology allows electronic devices to exchange data wirelessly over short distances using radio waves,bluetooth
+Which component of the CPU performs arithmetic and logical operations?,alu
+The first generation computers were characterized by the use of ___________,vacuum tubes
+Which component is known as the heart of the computer system?,central processing unit
+A step-by-step set of instructions written to solve a specific problem is called _______,algorithm
+MODEM stand for ________,modulator/demodulator
+Which type of memory retains its contents even when power is switched off?,rom
+Which type of computer processes data represented in continuous physical quantities such as temperature and voltage?,analogue computer
+What security test uses distorted text to verify if a user is human?,captcha
+The delivery of computing services over the internet is called _________,cloud computing
+What technology allows phone calls over the internet?,voice over internet protocol 
+A _________ is a network confined to a limited geographical area such as an office or group of buildings,local area network
+________computer performs computational tasks?,central processing unit
+To coordinate and control all computer operations is the primary function of the _________,control unit
+Which mouse technology uses a laser to detect movement?,optical mouse
+Computers designed to perform a specific task only are known as ___________,special-purpose computers
+What malware locks files and demands money for access?,ransomware
+A branch of AI that trains computers to learn from data without being explicitly programmed _________,machine learning
+What web tool allows users to search for information on the web using keywords?,search engine
+"Which network topology connects all computers to a central hub or switch, where failure of the central device brings down the entire network?",star topology
+"What software is used to view, retrieve and interpret web pages?",web browser
+Which two technologies that characterized second-generation computers?,transistors and diodes
+"A _____ has no geographical limit and can connect computers across the world, while a _____ is limited to a small geographical area. (separate answer with a /)",wan/lan
+How many bits make up one byte?,8
+What is the name of the computer's main circuit board?,motherboard
+Which type of ROM can be erased using ultraviolet light and reprogrammed? (state only the acronym),eprom
+Who is credited with the invention of computer programming?,ada lovelace
+John Von Neumann proposed ________ system for modern computing?,binary
+What device converts digital data to analog over telephone lines?,modem
+The _____ loses its contents when power is turned off.,ram
+What does HTTP stand for?,hypertext transfer protocol
+The Fifth-generation computers are mainly associated with ____________,artificial intelligence
+"In ___________ topology, data is transmitted as packets along a linear communication channel that terminates at both ends.",bus
+To manage and control computer resources is the main function of _____________,operating system
+"To allow a computer that wishes to send information to gain access to a network, a short message called a token is passed around the network in a _______ topology",ring
+Third-generation computers were characterized by _______,integrated circuits
+Which type of computer memory is volatile?,random access memory
+What does 'SIM' stand for in a phone's SIM card?,subscriber identity module
+"Which input device is primarily used to enter letters, numbers, and symbols into a computer?",keyboard
+A company has eight computers in a small office. Each computer manages its own security and shares files directly with others without a central server. Which network model best describes this setup?,peer-to-peer network
+What electronic system accepts data; process them and output a result?,computer
+A computer that combines the features of both digital and analogue computers is called ________,hybrid computer
+The network connecting devices within a limited geographical area like a school is called?,lan
+What device reads the lines printed on supermarket products?,barcode reader
+Security is weak because each computer manages only itself is one disadvantage of _________ network,peer-to-peer
+________ is a step-by-step description of an algorithm written in plain language or human-readable form and uses programming structures,pseudocode
+"A university wants to connect all its faculty buildings across a large campus within the same city into a single network. Based on geographical coverage, which type of network is most appropriate?",metropolitan area network
+______ megabytes(MBs) are in one gigabyte.,1024
+The part of the computer responsible for data processing function is called_______,central processing unit
+What device is required when transmitting computer data over a telephone line?,modem
+A _________ is a structured collection of related data stored electronically for easy management of information,database
+____________control the exchange of information between the network and the computer,network interface card
+The global system of interconnected computer networks is called____________,internet
+Which software phase involves fixing bugs and updating code after release?,maintenance
+___________ is the process of verifying that a program works correctly and is bug-free.,software testing
+The process of identifying (finding) and correcting (fixing) errors in a computer program is called ________,debugging
+An early working model (version) of a software application built to test a design concept is called,prototype
+A person who uses a software product is called ____,end user
+"_________ is a raw facts, figures, and symbols about an entity.",data
+How many bytes are in a gigabyte?,1 billion
+A collection of related fields describing a real-world entity is called ___________,record
+_______ is a data that has been processed into a meaningful form,information
+Which characteristic of information ensures that it is available when needed for decision-making?,timeliness
+Which method of data processing uses computers to automatically process data?,electronic processing
+A _______ data processing technique collects transactions over a period and processes them together at a later time?,batch
+A check performed to ensure that a value falls within specified limits is known as __________,range check
+A company needs to connect two networks that use completely different communication protocols. Which device is most suitable?,gateway
+"A _____ connects similar networks, while a ______connects incompatible networks (separate answers with a “/”)",bridge/gateway
+__________ is required when transmitting computer data over a telephone line because Telephone lines transmit analog signals while computers process digital data.,modem 
+"In a_________ transmission/communication system, data transmission occurs in both directions, but not at the same time.",half-duplex
+A walkie-talkie is an example of which mode of data transmission _____________,half-duplex
+A ___________ conversation is an example of a full-duplex communication system.,telephone
+_______ is generally preferred over __________for short-distance communication because it transmits multiple bits simultaneously (seperate answers with “/”),parallel transmission/serial transmission
+"In ___________transmission, the sender and receiver use synchronized clocks.",synchronous serial 
+A _________ reduces communication costs primarily by combining data from multiple channels onto a single transmission line.,multiplexor
+"In the basic elements of a communication system, the set of rules governing data communication is known as ________",protocol
+The ___________ processing technique that is prone to human error.,manual data
+Verifying a user's identity before granting access is called ____.,authentication
+A separate copy of data kept for emergency recovery is called ____,backup
+Removing errors and inconsistencies from a database is called ____,data cleaning
+A processed and structured data is called ____.,information
+A single horizontal row in a database is called ____,record
+CAPTCHA stand for ______________,completely automated public turing test to tell computers and humans apart.
+Which country won the 2025 FIFA U-17 World Cup tournament?  ,portugal
+In which sport is Tobi Amusan internationally recognized?,100 meter hurdles
+What is Nigeria’s longest running music award body called?,the headies
+Name the current Secretary-General of the United Nations.,antónio guterres
+What date did Nigeria become a republic?,1-Oct-63
+Which Nigerian state has the highest number of local government areas?,kano
+What is the name of the legislative building where Nigeria's National Assembly meets?,national assembly complex
+Which company developed the ChatGPT system?,open ai
+Which country hosts the headquarters of the United Nations?,united state
+Which African country has the largest population?,nigeria
+How many states are there in Nigeria?,36
+Who is the current Chief Justice of Nigeria?,justice kudirat kekere-ekun
+Which Nigerian agency is responsible for combating financial crimes?,efcc
+Which Nigerian institution is responsible for university accreditation?,nigeria university commission
+What significant event happened in Benin city in 1897?,benin invasion by britain
+How many geopolitical zones does Nigeria have?,6
+How many local governments are in Edo State?,18
+What is the name of the Dean of the Faculty of Computing?,prof. (mrs.) v. v. n. akwukwuma
+What is the umbrella body for computing professionals in Nigeria?,nigeria computer society
+_______ is a program written by a programmer in a high-level programming language.,source code
+GUI stands for ___________,graphical user interface
+A ________ is a group of 16 bits or 2 bytes,word
+ASCII stands for _________________,american standard code for information interchange
+__________ is a computer that provides data or services to other computers.,server
+________is a secret string of characters used to log into an account,password
+________ is a utility program that detects viruses and removes it.,antivirus
+_______ is the buying and selling goods or services online,e-commerce
+The purpose of _______ is to find one's exact location anywhere on Earth.,gps
+_________ is the means of saving a file from the internet onto a local device.,downloading 
+The _________ and ______ are the houses that form Nigeria's national assembly (separate with a “/”),senate /house of representatives
+___________ is the executive head of the local government area,local government chairman
+___________ is the highest court of law in Nigeria.,supreme court
+___________ presides over meetings in the Nigerian Red chamber of the legislative arm of Nigeria government.,senate president
+The law-making body at the state level is called ____________,state house of assembly
+Who is the current Vice Chancellor of UNIBEN?,prof. edoba bright omoregie (san)
+In what year was University of Benin founded?,1970
+What is the official motto of UNIBEN?,knowledge for service
+The UNIBEN main library in Ugbowo campus is called ____________,john harris library
+Who is the current dean of students?,prof. f.o. ekhaise
+The names of current HODs of Information Technology and Cybersecurity are ___________ and ____________ respectively. (separate with “/”),prof. (mrs) osubor/prof. (mrs) egwali
+The names of current HODs of Data Science and ICT are ___________ and ____________ respectively.(separate with “/”),prof. (mrs) koneha/prof. amadin
+The names of current HODs of Software Engineering and Computer Science are ___________ and ____________ respectively.(separate with “/”),dr. aziken/dr. usiobaifo
+_______is the ceremonial hall in UNIBEN (Ugbowo campus).,akin deko hall
+,
